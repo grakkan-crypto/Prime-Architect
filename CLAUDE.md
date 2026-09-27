@@ -7,6 +7,10 @@
 
 Nothing meant for Claude goes into a header's rules. Nothing meant for the internal AI depends on this file.
 
+## System model
+
+This is an AI server, all-in-one system, not an application running on an OS. Subsystems such as Pool Maintenance (pools), FileLoader (disk), the memory distributor (RAM and VRAM) and Wellness (system health) are core layers, each directly owning and controlling its domain. They do not ask a separate OS for permission within their own domain. Do not describe or design them as applications requesting from an OS.
+
 ## Rules sections in headers
 
 Every header that is edited must carry a rules section. If it has none, one is written as part of the edit.

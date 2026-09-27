@@ -126,9 +126,7 @@ void LiveRegistry::store_pipeline(const std::string& pipeline_name,
 
     // Prompt links belong to the pipeline that generated them. A landing
     // makes every one of them meaningless, win or lose — cleared every
-    // time this fires, not only on success. Pool-file tags are untouched:
-    // those are direct reads off standing pools, and their owner clears
-    // them when it tears those pools down.
+    // time this fires, not only on success.
     {
         std::lock_guard<std::mutex> lock(links_mutex_);
         prompt_links_.clear();
@@ -275,48 +273,6 @@ std::vector<std::string> LiveRegistry::linked_pools(const std::string& prompt_id
 void LiveRegistry::unlink_prompt(const std::string& prompt_id) {
     std::lock_guard<std::mutex> lock(links_mutex_);
     prompt_links_.erase(prompt_id);
-}
-
-// ---------------------------------------------------------------------------
-// Files — Pool ID -> source file tag. Its own section, written by the
-// FileLoader in the mint motion. ONE store; file -> pools is a scan of it,
-// never a second map.
-// ---------------------------------------------------------------------------
-
-void LiveRegistry::set_pool_file_tag(const std::string& pool_id,
-                                     const std::string& file) {
-    std::lock_guard<std::mutex> lock(files_mutex_);
-    pool_file_tags_[pool_id] = file;
-}
-
-std::optional<std::string> LiveRegistry::pool_file_tag(
-        const std::string& pool_id) const {
-    std::lock_guard<std::mutex> lock(files_mutex_);
-    auto it = pool_file_tags_.find(pool_id);
-    if (it == pool_file_tags_.end()) return std::nullopt;
-    return it->second;
-}
-
-std::vector<std::string> LiveRegistry::pools_with_file_tag(
-        const std::string& file) const {
-    std::lock_guard<std::mutex> lock(files_mutex_);
-    std::vector<std::string> out;
-    for (const auto& [pool_id, f] : pool_file_tags_)
-        if (f == file) out.push_back(pool_id);
-    return out;
-}
-
-void LiveRegistry::clear_pool_file_tag(const std::string& pool_id) {
-    std::lock_guard<std::mutex> lock(files_mutex_);
-    pool_file_tags_.erase(pool_id);
-}
-
-void LiveRegistry::clear_file_tags(const std::string& file) {
-    std::lock_guard<std::mutex> lock(files_mutex_);
-    for (auto it = pool_file_tags_.begin(); it != pool_file_tags_.end();) {
-        if (it->second == file) it = pool_file_tags_.erase(it);
-        else ++it;
-    }
 }
 
 // ---------------------------------------------------------------------------

@@ -33,11 +33,8 @@
 //   whiteboard is reached.
 //
 // ===========================================================================
-// OFFICIAL RULINGS. During development these rules are structural
-// guidelines. A change that would break one is raised with the user and
-// made only after consultation. The user alone moves them. Where a ruling
-// below amends an earlier one, the amendment was deliberate and agreed; the
-// earlier wording is not to be reinstated.
+// OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
+// definition. It is raised with the user, never made.
 //
 // 1. WATCHER IS THE ONLY FILE IN THE SYSTEM THAT POLLS.
 //    Nothing else loops, checks its own input on a timer, or announces
@@ -92,8 +89,7 @@
 //    copy is published whole, and a published copy is never touched again.
 //    A reader reads the copy, directly — no call into this file, no broker —
 //    and holds a finished list, last pass's or this pass's, never one
-//    mid-edit, for as long as it likes. The OS is the named reader; what it
-//    does with a name on the list is the OS's.
+//    mid-edit, for as long as it likes.
 //
 // 6. THE LIVE LIST HAS ONE EDITOR.
 //    Adding and removing are both editing, and nothing outside this file
@@ -122,24 +118,12 @@
 //    works out what was meant and registers the corrected request through
 //    the ordinary door as its own.
 //
-// 9. READS ARE OF THE SOURCE ITSELF, WHOLE, AND OF THESE TYPES.
-//    Watcher goes and looks. It asks nothing of anyone — reaching the map
-//    through the screen is not a request — and a requester never supplies
-//    a way of reading — Watcher must already know the type, and if the
-//    requester itself has no access to the source that is no matter,
-//    Watcher reads it anyway. What it can read today: the pool map, through
-//    the screen on LiveRegistry — the actual IDs at the source of truth, or
-//    a photo of that same source while an edit runs, never a report, table
-//    or list made by someone else; a pool's content, off VRAM; RAM; VRAM;
-//    a flag a file keeps; a file on disk. This list is not exhaustive: a new
-//    type is added here, and named here, when a requester needs it.
-//    Everything of a type is read whole, once per pass — the whole map,
-//    every pool not forbidden, foreground and background alike — and
-//    selection happens afterwards, in evaluation, never at the read. The
-//    map read carries its own view of itself by class, turn and prompt,
-//    built once from the records; the content read, being the map less the
-//    forbidden, takes that same view less the forbidden. The view is the
-//    read, not a selection of it, and nothing else is ever classified twice.
+// 9. WATCHER READS FOR ITSELF, WHOLE, ONCE PER PASS.
+//    Watcher goes and looks for itself and asks nothing of anyone. A
+//    requester never supplies a way of reading, and whether the requester
+//    can reach the source itself does not matter.
+//    Every source is read whole, once per pass, and selection happens
+//    afterwards, in evaluation, never at the read.
 //
 // 10. A SOURCE IS READ ONLY WHILE SOMETHING NAMES IT, AND FORGOTTEN THE
 //     MOMENT NOTHING DOES.
@@ -288,8 +272,8 @@ struct Request {
     ActiveLevel              level   = ActiveLevel::Foreground;
 };
 
-// A pool as the map states it. Read whole through the screen on
-// LiveRegistry. Class is the number LiveRegistry assigned; the rest is text.
+// A pool as the map states it. Class is the number LiveRegistry assigned;
+// the rest is text.
 struct PoolRecord {
     std::string              id;
     std::uint64_t            class_id     = 0;
@@ -349,7 +333,7 @@ public:
     void Watcher_Deregister(const std::string& name);
     void Watcher_ScopeTeardown(const std::string& scope);
 
-    // Sleep and wake (Ruling 11). Nothing sends these yet.
+    // Sleep and wake (Ruling 11).
     void Watcher_Sleep();
     void Watcher_Wake();
 
@@ -361,7 +345,7 @@ public:
     // statement of what is forbidden. What is read here is always a finished
     // list — the last one this file published, whole — and a reader that has
     // taken one holds it unchanged for as long as it likes. Nothing writes
-    // through this. The OS is the named reader.
+    // through this.
     const std::atomic<std::shared_ptr<const std::set<std::string>>>& forbidden = forbidden_published_;
 
 private:
@@ -416,12 +400,6 @@ private:
     std::map<std::string, Snapshot> memory_now_,       prev_memory_;
     bool                            has_map_     = false;
     bool                            has_content_ = false;
-
-    // this pass only: the pool sources were read off the screen. A read that
-    // failed leaves these false — that source was not read this pass. Set at
-    // the read, cleared at bookkeeping; held by nothing between passes.
-    bool                            map_read_     = false;
-    bool                            content_read_ = false;
 
     // the forbidden list as this file edits it (Ruling 5). Pruned at the
     // read, added to at bookkeeping, published when it changed.

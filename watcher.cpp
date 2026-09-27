@@ -6,7 +6,8 @@
 
 #include "watcher.h"
 
-#include "live_registry.h"      // the screen — where the map is looked at
+#include "live_registry.h"      // the screen — where the map's image is taken
+#include "pool_maintenance.h"   // the pool map hub: the image's name and layout
 #include "text_file.h"          // read_text_file — the plain disk read
 
 #include <algorithm>
@@ -15,13 +16,10 @@
 #include <utility>
 
 // ---------------------------------------------------------------------------
-// FORWARD DECLARATIONS — called exactly as if they exist; each real header
-// replaces its declaration here outright, with the calls below unchanged.
-//
-// Reads (Ruling 9): a pool's content off VRAM; a region of unified memory; a
-// flag a file keeps. A flag or a region that is not there is nullopt. The
-// stop token's text. The map is not declared here: it is read through the
-// screen on LiveRegistry, in the loop.
+// THE READS WATCHER MAKES (Ruling 9): a pool's content off VRAM; a region of
+// unified memory; a flag a file keeps. A flag or a region that is not there
+// is nullopt. The stop token's text. The map is not declared here: it is
+// read through the screen on LiveRegistry, in the loop.
 // ---------------------------------------------------------------------------
 namespace prime {
 
@@ -69,6 +67,9 @@ Snapshot single(std::optional<std::string> v) {
     if (v) s.emplace(std::string{}, WatcherItem{ std::move(*v), std::nullopt });
     return s;
 }
+
+// One thing sought in pool content: the test and the value it looks for.
+using Sought = std::pair<Test, std::string>;
 
 std::string memory_key(const Entry& e) {
     return std::to_string(e.address) + ":" + std::to_string(e.length);
@@ -161,6 +162,21 @@ std::vector<std::string> in_state(const Entry& e,
     return ids;
 }
 
+// A shared content result taken by one entry: the pools found, kept where
+// the record each pool carries — on `look`, or on `also` for a pool no longer
+// there — matches the entry's selector. NOT then applied as in in_state.
+std::vector<std::string> narrowed(const Entry& e, const std::vector<std::string>& found,
+                                  const Snapshot& look, const Snapshot* also) {
+    std::vector<std::string> ids;
+    for (const std::string& id : found) {
+        const auto it = look.find(id);
+        if (matches(e.selector, it != look.end() ? it->second : also->at(id))) ids.push_back(id);
+    }
+    if (e.negate) return ids.empty() ? std::vector<std::string>{ std::string{} }
+                                     : std::vector<std::string>{};
+    return ids;
+}
+
 } // namespace
 
 // ===========================================================================
@@ -177,8 +193,6 @@ void Watcher::open(Door door) {
         doors_.push_back(std::move(door));
         if (!running_) { running_ = true; start = true; }
     }
-    // THE LOOP'S THREAD. Priority is not set here; that is the system's to
-    // grant, at the OS layer, when it exists. This is the one place to do it.
     if (start) std::thread([this] { run(); }).detach();
 }
 
@@ -273,10 +287,10 @@ const Snapshot* Watcher::snapshot_of(const Entry& e, bool previous) const {
     switch (e.kind) {
     case SourceKind::PoolMap:
         return previous ? (has_map_ ? &prev_map_ : nullptr)
-                        : (map_read_ ? &map_now_ : nullptr);
+                        : (map_now_.empty() && !has_map_ ? nullptr : &map_now_);
     case SourceKind::PoolContent:
         return previous ? (has_content_ ? &prev_content_ : nullptr)
-                        : (content_read_ ? &content_now_ : nullptr);
+                        : (content_now_.empty() && !has_content_ ? nullptr : &content_now_);
     default: {
         const auto& m  = e.kind == SourceKind::Flag     ? (previous ? prev_flags_  : flags_now_)
                        : e.kind == SourceKind::DiskFile ? (previous ? prev_files_  : files_now_)
@@ -393,33 +407,21 @@ void Watcher::run() {
 
         // ---- B. READ — whole, once, the map first (Ruling 9). Asleep, only
         // what background names.
-        bool read_map     = asleep ? pool_map_watch_.background > 0
-                                   : pool_map_watch_.foreground + pool_map_watch_.background > 0;
-        bool read_content = asleep ? pool_content_watch_.background > 0
-                                   : pool_content_watch_.foreground + pool_content_watch_.background > 0;
+        const bool read_map     = asleep ? pool_map_watch_.background > 0
+                                         : pool_map_watch_.foreground + pool_map_watch_.background > 0;
+        const bool read_content = asleep ? pool_content_watch_.background > 0
+                                         : pool_content_watch_.foreground + pool_content_watch_.background > 0;
         bool forbidden_changed = false;
         std::vector<PoolRecord> map;
         PoolView                view;
         if (read_map || read_content) {
-            // Arrive at the screen. What it points at is the live map, or the
-            // photo of that same map while an edit runs: the actual IDs at
-            // the source of truth, never a report of them. Copied whole into
-            // this file's own records, then left at once — the screen is
-            // never held while this file works.
-            // OS_NEEDS: the screen on LiveRegistry pointing at the live pool
-            //           map, or at its capture while Pool Maintenance edits.
-            const PoolMap* shown = live_registry().screen();
-            const bool wellness_check_watcher_map_read = shown != nullptr;
-            (void)wellness_check_watcher_map_read;
-            if (shown == nullptr) {
-                // Not read this pass: nothing is compared, the previous copy
-                // stays. Content is the map less the forbidden, so it is not
-                // read either.
-                read_map     = false;
-                read_content = false;
-            } else {
-                map.reserve(shown->size());
-                for (const auto& entry : *shown) {
+            // Take the current image off the screen, directly; copy every
+            // record into this file's own working copy; drop the image.
+            {
+                const PoolMapImage& image = *static_cast<const PoolMapImage*>(
+                    live_registry().screen.load(std::memory_order_acquire));
+                map.reserve(image.size());
+                for (const auto& entry : image) {
                     const Pool& p = *entry.second;
                     PoolRecord r;
                     r.id           = p.pool_id;
@@ -430,22 +432,20 @@ void Watcher::run() {
                     r.bytes        = p.byte_capacity;
                     map.push_back(std::move(r));
                 }
-                for (auto it = forbidden_.begin(); it != forbidden_.end();) {
-                    bool present = false;
-                    for (const PoolRecord& p : map) if (p.id == *it) { present = true; break; }
-                    if (present) ++it;
-                    else { it = forbidden_.erase(it); forbidden_changed = true; }
-                }
-                // The read's own view of itself, from the records, once.
-                for (const PoolRecord& p : map) {
-                    view.by_class[p.class_id].push_back(p.id);
-                    view.by_turn[p.turn_id].push_back(p.id);
-                    for (const std::string& pr : p.prompt_ids) view.by_prompt[pr].push_back(p.id);
-                }
+            }
+            for (auto it = forbidden_.begin(); it != forbidden_.end();) {
+                bool present = false;
+                for (const PoolRecord& p : map) if (p.id == *it) { present = true; break; }
+                if (present) ++it;
+                else { it = forbidden_.erase(it); forbidden_changed = true; }
+            }
+            // The read's own view of itself, from the records, once.
+            for (const PoolRecord& p : map) {
+                view.by_class[p.class_id].push_back(p.id);
+                view.by_turn[p.turn_id].push_back(p.id);
+                for (const std::string& pr : p.prompt_ids) view.by_prompt[pr].push_back(p.id);
             }
         }
-        map_read_     = read_map;
-        content_read_ = read_content;
         if (read_map) {
             map_now_.clear();
             for (const PoolRecord& p : map) map_now_.emplace(p.id, WatcherItem{ {}, p });
@@ -485,6 +485,38 @@ void Watcher::run() {
                 memory_now_[key] = single(unified_memory(address, length));
             }
 
+        // ---- SHARED CONTENT SEARCHES. Every distinct thing sought in pool
+        // content by a request evaluated this pass, the stop token always
+        // among them, is searched for once across every non-forbidden pool's
+        // copy. Every request that asked for it takes that one result.
+        std::map<Sought, std::vector<std::string>> found_now;
+        std::map<Sought, std::vector<std::string>> found_before;
+        std::string token;
+        if (read_content) {
+            token = stop_token();
+            const Snapshot* old      = has_content_ ? &prev_content_      : nullptr;
+            const PoolView* old_view = has_content_ ? &prev_content_view_ : nullptr;
+            const auto search = [&](Test test, const std::string& value, bool before) {
+                const Sought key{ test, value };
+                Entry bare;
+                bare.kind  = SourceKind::PoolContent;
+                bare.test  = test;
+                bare.value = value;
+                if (!found_now.count(key))
+                    found_now.emplace(key, in_state(bare, content_now_, &content_view_now_, old, old_view));
+                if (before && old != nullptr && !found_before.count(key))
+                    found_before.emplace(key, in_state(bare, *old, old_view, nullptr, nullptr));
+            };
+            search(Test::Contains, token, false);
+            for (const Live& l : live_) {
+                if (asleep && l.request.level == ActiveLevel::Foreground) continue;
+                for (const Entry& e : l.request.triggers)
+                    if (e.kind == SourceKind::PoolContent) search(e.test, e.value, true);
+                for (const Entry& e : l.request.checks)
+                    if (e.kind == SourceKind::PoolContent) search(e.test, e.value, false);
+            }
+        }
+
         // ---- C–F. EVALUATE, ATTEMPT, DELIVER.
         std::vector<std::size_t> fired_out;
         for (std::size_t i = 0; i < live_.size(); ++i) {
@@ -506,8 +538,12 @@ void Watcher::run() {
                 const Snapshot& old      = *snapshot_of(e, true);
                 const PoolView* now_view = view_of(e, false);
                 const PoolView* old_view = view_of(e, true);
-                const std::vector<std::string> now_ids    = in_state(e, now, now_view, &old, old_view);
-                const std::vector<std::string> before_ids = in_state(e, old, old_view, nullptr, nullptr);
+                const bool   shared = e.kind == SourceKind::PoolContent;
+                const Sought key{ e.test, e.value };
+                const std::vector<std::string> now_ids    = shared ? narrowed(e, found_now.at(key), now, &old)
+                                                                   : in_state(e, now, now_view, &old, old_view);
+                const std::vector<std::string> before_ids = shared ? narrowed(e, found_before.at(key), old, nullptr)
+                                                                   : in_state(e, old, old_view, nullptr, nullptr);
 
                 std::vector<std::string> pending;
                 for (const std::string& id : l.pending[k])
@@ -557,9 +593,11 @@ void Watcher::run() {
             bool passes = true;
             for (const Entry& c : r.checks) {
                 const Snapshot* now = snapshot_of(c, false);
-                if (now == nullptr ||
-                    in_state(c, *now, view_of(c, false), snapshot_of(c, true), view_of(c, true)).empty())
-                    passes = false;
+                if (now == nullptr) { passes = false; continue; }
+                const std::vector<std::string> ids = c.kind == SourceKind::PoolContent
+                    ? narrowed(c, found_now.at(Sought{ c.test, c.value }), *now, snapshot_of(c, true))
+                    : in_state(c, *now, view_of(c, false), snapshot_of(c, true), view_of(c, true));
+                if (ids.empty()) passes = false;
             }
 
             // ---- deliver, count (Rulings 3, 12) ----------------------------
@@ -589,12 +627,9 @@ void Watcher::run() {
         // then, if it changed this pass, a complete copy published whole.
         // Then previous becomes current for everything read this pass; a
         // pool read's view of itself goes with it.
-        if (read_content) {
-            const std::string token = stop_token();
-            for (const auto& [id, item] : content_now_)
-                if (item.value.find(token) != std::string::npos && forbidden_.insert(id).second)
-                    forbidden_changed = true;
-        }
+        if (read_content)
+            for (const std::string& id : found_now.at(Sought{ Test::Contains, token }))
+                if (forbidden_.insert(id).second) forbidden_changed = true;
         if (forbidden_changed)
             forbidden_published_.store(std::make_shared<const std::set<std::string>>(forbidden_));
         if (read_map) {
@@ -607,8 +642,6 @@ void Watcher::run() {
             prev_content_view_ = std::move(content_view_now_); content_view_now_ = PoolView{};
             has_content_ = true;
         }
-        map_read_     = false;
-        content_read_ = false;
         for (auto& [name, s] : flags_now_)  prev_flags_[name] = std::move(s);
         for (auto& [path, s] : files_now_)  prev_files_[path] = std::move(s);
         for (auto& [key,  s] : memory_now_) prev_memory_[key] = std::move(s);

@@ -3,29 +3,17 @@
 // ===========================================================================
 // SCOPE — EXACTLY THIS, AND NOTHING BEYOND IT
 //
-//   LiveRegistry holds the live facts of the running system and hands them
-//   back unchanged to whoever asks. It holds:
-//
-//     - the loaded pipeline's name
-//     - the loaded pipeline's roster: the agent names, as declared
-//     - the loaded pipeline's pool table: every declared pool, its mask
-//       triggers, its agents and their permission bits, verbatim from the
-//       pipeline payload, each carrying the class id this registry assigned
-//     - the temperature values committed onto it
-//     - the rebuttal switch, and who to tell when it flips
-//     - prompt links: which pools a prompt is generating into
-//     - pool-file tags: which source file a minted pool came from
-//
-//   and it carries THE KEY — the one statement of what every permission and
-//   mask bit means, so that no reader and no future pipeline author has to
-//   guess.
+//   LiveRegistry is the single collection of active system state, read by
+//   multiple sources. It answers "what interchangeable thing is happening
+//   right now?". It does not participate. It is the system noticeboard for
+//   current state.
 //
 //   It does not read disk. It does not resolve anything for another file.
 //   It does not validate. It does not derive. It does not decide.
 //
 // ===========================================================================
-// OFFICIAL RULINGS — FIXED POINTS. A change that would break one of these is
-// wrong by definition and is raised with the user instead of made.
+// OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
+// definition. It is raised with the user, never made.
 //
 // 1. LIVEREGISTRY SORTS AND ORGANISES; IT DOES NOT COMPUTE.
 //    Reserving a known name's fixed number, or counting sequentially through
@@ -292,13 +280,46 @@ public:
     std::vector<std::string> linked_pools(const std::string& prompt_id) const;
     void unlink_prompt(const std::string& prompt_id);
 
-    // ---- pool-file tags — Pool ID -> source file -----------------------------
-    // ONE store; file -> pools is a scan of it, never a second map.
-    void set_pool_file_tag(const std::string& pool_id, const std::string& file);
-    std::optional<std::string> pool_file_tag(const std::string& pool_id) const;
-    std::vector<std::string>   pools_with_file_tag(const std::string& file) const;
-    void clear_pool_file_tag(const std::string& pool_id);
-    void clear_file_tags(const std::string& file);
+    // ---- the screen ---------------------------------------------------------
+    // Where readers find the current image of the pool map. Written only by
+    // Pool Maintenance and the system core.
+    //
+    // The screen holds the current image of the pool map. What the image
+    // is called, what it contains, and how it is laid out, is stated by the
+    // pool map hub, owned by Pool Maintenance. Read it there. Nothing about
+    // it is stated here.
+    //
+    // OS BUILD OUTLINE — TO BE REMOVED ONCE THE OS IS BUILT.
+    //   1. The pool map belongs to Pool Maintenance, the system's core layer
+    //      for pools. No reader ever has access to the map itself.
+    //   2. The screen always holds the image of the latest complete version
+    //      of the map.
+    //   3. Arriving: a reader takes the image from the screen, without
+    //      calling anything. Taking it counts as arriving, and the system
+    //      core records the reader as holding that version.
+    //   4. One image per reader: a reader holds one image at a time, and
+    //      taking a new one drops the old. Images cannot be passed from one
+    //      reader to another.
+    //   5. Leaving: a reader drops its image, without sending a message. When
+    //      the last holder of a version drops it and that version is no
+    //      longer on the screen, the version is freed.
+    //   6. Editing:
+    //      - Pool Maintenance edits the map directly, from memory reserved to
+    //        it at all times, and never waits on readers.
+    //      - Before any block of the map changes, the system core keeps that
+    //        block's current contents aside for every version still held.
+    //        Only the changed blocks are kept, never synced, and they are
+    //        freed with their version.
+    //      - While the edit runs, the screen keeps the last complete version.
+    //      - When the edit is complete, Pool Maintenance puts the new version
+    //        on the screen itself.
+    //   7. The screen sits in memory of its own: writable only by Pool
+    //      Maintenance and the system core, read-only to everything else.
+    //   8. A change to the image's name or layout reaches the screen only
+    //      once Wellness has brought every reader into line with the pool
+    //      map hub.
+    //   9. Dead or stuck holders, and an empty screen, belong to Wellness.
+    std::atomic<const void*> screen{nullptr};
 
 private:
     // Pipeline-scoped — everything under this lock swaps as one.
@@ -316,10 +337,6 @@ private:
     // Prompt links
     mutable std::mutex                                  links_mutex_;
     std::map<std::string, std::vector<std::string>>     prompt_links_;
-
-    // Pool-file tags
-    mutable std::mutex                 files_mutex_;
-    std::map<std::string, std::string> pool_file_tags_;
 };
 
 // ===========================================================================
@@ -328,7 +345,7 @@ private:
 
 // The single live whiteboard. It exists from SYSTEM load — created when the
 // program comes up, not when a pipeline does. It is the live registry of the
-// system; the pipeline is simply all it happens to hold so far. Whoever
+// system; the pipeline is one of the things it holds. Whoever
 // needs it calls it directly, here, and calls its operations on it.
 LiveRegistry& live_registry();
 
