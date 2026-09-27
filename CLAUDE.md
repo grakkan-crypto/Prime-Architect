@@ -32,6 +32,14 @@ The one exception: a build outline for something not yet built (for example, wha
 
 NO spec file OR existing code EVER overrules the user. Any contradictions found are raised and mentioned so the edit is a conscious choice, but it is NOT a blocker.
 
+The system is NOT complete. Some files will NOT align. This is not a blocker. This does NOT mean the user is wrong. Raise conflicts for awareness ONLY.
+
+## No shadow copies
+
+No shadow copy of anything, anywhere: nothing is ever kept in step with something else by a call or an extra step. Rejected outright.
+
+A working copy is not a shadow copy: a copy taken for one strict function, never kept in step with its source, and destroyed a moment later (for example, a copy taken to compare against the next read, discarded when that read replaces it).
+
 ## Failure
 
 The system will contain a self-healing, system-wide, contextually aware layer: Wellness. Wellness is to be TOLD of any potential failures using the standard methods. A fail RARELY stops anything, and ONLY on the user's EXPLICIT say so.
