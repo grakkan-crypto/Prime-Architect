@@ -38,6 +38,14 @@ NO spec file OR existing code EVER overrules the user. Any contradictions found 
 
 The system is NOT complete. Some files will NOT align. This is not a blocker. This does NOT mean the user is wrong. Raise conflicts for awareness ONLY.
 
+## The system does not build — and that is expected
+
+For the entire time this project is worked on with Claude, the system is unbuildable. There is no boot mechanism, many files are broken or mid-conversion, and whole layers are not yet built. If it could build, it would be building itself.
+
+- "This won't build", "this won't link", "this breaks X", "nothing provides Y yet" are NOT findings. Do not raise them, and never weigh a design against whether the current code builds.
+- Judge every change on one thing: is it right for the designed system, as the user describes it?
+- Raise only a genuine design conflict: two parts of the design, as described, that contradict each other. Say it once, briefly, for awareness. Never repeat it and never treat it as a blocker.
+
 ## No shadow copies
 
 No shadow copy of anything, anywhere: nothing is ever kept in step with something else by a call or an extra step. Rejected outright.
