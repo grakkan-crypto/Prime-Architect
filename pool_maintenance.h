@@ -1,5 +1,6 @@
-// pool_maintenance.h — THE POOL. One file: a pool comes into existence here,
-// lives here, and goes out of existence here. Nowhere else.
+// pool_maintenance.h — THE POOL'S MAINTAINER. One file: a pool comes into
+// existence here and goes out of existence here. Nowhere else. It lives on
+// the pool map, on LiveRegistry; this file holds nothing.
 //
 // ===========================================================================
 // POOL MAINTENANCE RULES — FIXED POINTS. A change that would break one of
@@ -19,9 +20,9 @@
 //
 // 3. CLASS ID IS READ, NEVER HELD, NEVER WRITTEN BACK.
 //    This file never hardcodes a Class ID as a literal, never re-derives
-//    one, and never writes anything to LiveRegistry. A caller supplies the
-//    number or the name; a name is resolved by a direct read at that moment,
-//    every time.
+//    one, and never writes to the class table. A caller supplies the number
+//    or the name; a name is resolved by a direct read at that moment, every
+//    time.
 //
 // 4. THE STAMP IS FIXED AT MINT.
 //    Pool ID, Turn ID, Prompt ID(s), timestamp never change after creation.
@@ -29,11 +30,11 @@
 //    changes nothing else — no cascading writes, no side effects, no reach
 //    into any other file's state.
 //
-// 5. THIS FILE IS NOT A DIRECTORY.
-//    It offers no lookup, no find, no enumeration of pools by any criterion,
-//    to any caller. Its internal record of which blocks belong to which pool
-//    exists solely so this file can manage that memory — it is never exposed
-//    as a way for another file to locate a pool.
+// 5. THIS FILE HOLDS NOTHING.
+//    No map, no list, no record of any pool, no copy of the map. The map is
+//    on LiveRegistry; this file reaches its future layer through the OS,
+//    edits it, and mounts it. It offers no lookup, no find, no enumeration
+//    of pools by any criterion, to any caller.
 //
 // 6. ONE FILTER, NO VARIANTS.
 //    Destroy, Flag, and Unflag share the one filter shape — Class ID, Turn
@@ -46,42 +47,53 @@
 //    Destroy checks this as part of its own execution; no caller ever
 //    performs that check itself.
 //
-// 8. NO REFUSAL IS SILENT.
+// 8. NO REFUSAL IS SILENT. NOTHING IS REVERTED.
 //    A create, grow, or reclassify that cannot complete returns nothing
 //    usable and leaves nothing standing in place of what was asked for. A
 //    wellness flag reports the true outcome; no stand-in value is ever
-//    substituted for a missing one.
+//    substituted for a missing one. The one case where something is left
+//    standing is a mount that fails after a chunk was taken: the pool stays
+//    where it is, with its chunk, and the flag says so. Nothing is ever
+//    undone to tidy up.
 //
 // 9. THIS FILE IS MECHANICAL.
 //    It never decides whether a pool should be destroyed, flagged, or kept.
 //    It executes exactly what a caller, holding that authority, tells it to
 //    do.
 //
-// 10. BLOCK SIZE IS THE ALLOCATOR'S FACT, NOT THIS FILE'S FIGURE.
-//    One block is one allocation unit as MemoryAllocator reports it. No byte
-//    count is ever invented or hardcoded here in its place.
+// 10. CHUNK SIZE IS THE OS'S FACT, NOT THIS FILE'S FIGURE.
+//    One chunk is one unit as the OS reports it, uniform across every pool,
+//    and never written onto an entry. No byte count is ever invented or
+//    hardcoded here in its place.
+//
+// 11. EVERY EDIT IS ON THE FUTURE LAYER, AND EVERY ACTION MOUNTS.
+//    Slow work — taking a chunk — first; then the edit, on the future layer
+//    alone; then the mount, as the last step of the same action. The layer
+//    being read is never edited. Destroy removes the entry, mounts, and only
+//    then returns the chunks.
 // ===========================================================================
 //
 // WHAT A POOL IS
-//   One object. Its identity, its classification, its immunity, and its bytes
-//   are fields on that one object — not a table beside it, not a record in
-//   another file, not a lookup anywhere. Anything needing a fact about a pool
-//   reads the pool. This file is the only thing that CREATES, RESIZES,
-//   RECLASSIFIES, FLAGS, or DESTROYS a pool. Content and the tail marker are
-//   written directly by whatever is generating; they are not this file's.
+//   One entry on the pool map (live_registry.h). Its identity, its Class
+//   ID, its immunity, and its chunks are fields on that one entry — not a
+//   table beside it, not a record in this file, not a lookup anywhere.
+//   Anything needing a fact about a pool reads the map. This file is the
+//   only thing that CREATES, GROWS, RECLASSIFIES, FLAGS, or DESTROYS a pool.
+//   Content is written directly by whatever is generating; it is not this
+//   file's.
 //
 // THE STAMP
 //   Pool ID (minted by IdGeneration), Class ID, Turn ID, Prompt ID(s),
 //   timestamp: set at the instant of creation. Turn ID may be empty (minted
-//   before any turn exists). Prompt ID(s) may be empty (start of a chain).
-//   Empty is a fact, not a branch. Prompt ID(s) are copied off the ONE pool
-//   this one continues — read directly off that pool.
+//   before any turn exists). Prompt ID(s) may be empty (start of a chain, or
+//   no prompt). Empty is a fact, not a branch. Prompt ID(s) are copied off
+//   the ONE pool this one continues — read directly off that pool's entry.
 //
 // SIZING
-//   A pool is bytes, held as blocks. Mint takes one block. Every grow takes
-//   one more. Whatever is writing decides WHEN to grow, by reading
-//   byte_capacity off the pool and calling grow. This file never watches for
-//   that.
+//   A pool is bytes, held as chunks of one uniform size. Mint takes one
+//   chunk. Every grow takes one more. Whatever is writing decides WHEN to
+//   grow, by reading capacity off the entry and calling grow. This file
+//   never watches for that.
 //
 // CREATE AND ITS CALLER
 //   The caller fires and moves on. Create hands nothing back to it — the
@@ -93,46 +105,23 @@
 // WELLNESS
 //   Bare booleans, named for what they answer, set at the instant they are
 //   answered, never read again here. Wellness sees them because they exist.
+//
+// OS_OWES
+//   The marker word (live_registry.h). The OS supplies the future layer and
+//   the mount, and the chunks; each is declared where it is called.
 
 #pragma once
 
-#include "memory_allocator.h"
+#include "live_registry.h"
 
-#include <atomic>
 #include <cstdint>
-#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <variant>
 #include <vector>
 
 namespace prime {
-
-// ---------------------------------------------------------------------------
-// THE POOL OBJECT — every fact about a pool, on the pool.
-// ---------------------------------------------------------------------------
-struct Pool {
-    // ---- identity: set at mint, fixed thereafter (class_id: reclassify only)
-    std::string              pool_id;
-    std::uint64_t            class_id     = 0;
-    std::string              turn_id;            // empty: minted before any turn
-    std::vector<std::string> prompt_ids;         // empty: start of a chain
-    std::uint64_t            timestamp_ns = 0;   // moment of mint
-
-    // ---- do-not-destroy: the sources this pool is immune to. Empty by default.
-    std::vector<std::string> immune_from;
-
-    // ---- bytes: the pool IS this list of blocks. No ceiling, nothing reserved.
-    std::vector<uint8_t*>    blocks;
-    std::uint64_t            block_size    = 0;   // one allocation unit, as reported
-    std::uint64_t            byte_capacity = 0;   // blocks * block_size, kept in step by grow/shrink
-
-    // ---- progress: byte offset of the last committed content. Written by
-    //      whatever is writing, read by whatever is reading. Not this file's.
-    std::atomic<std::uint64_t> tail{0};
-};
 
 // ---------------------------------------------------------------------------
 // A CLASS, AS THE CALLER HAS IT — the number, or the declared name.
@@ -156,56 +145,56 @@ struct PoolFilter {
 // ---------------------------------------------------------------------------
 class PoolMaintenance {
 public:
-    explicit PoolMaintenance(MemoryAllocator& mem) : mem_(mem) {}
-    ~PoolMaintenance();
+    PoolMaintenance() = default;
 
     PoolMaintenance(const PoolMaintenance&)            = delete;
     PoolMaintenance& operator=(const PoolMaintenance&) = delete;
 
     // ---- create: the moment of need --------------------------------------
-    // Mint a pool NOW, with its first block. One call for every pool.
+    // Mint a pool NOW, with its first chunk. One call for every pool.
     //
     //   cls            — the Class ID number, or the declared name; a name is
     //                    read off LiveRegistry here, at this moment.
     //   turn_id        — the turn this pool belongs to; empty before any turn.
     //   continues_from — the ONE pool this continues; its prompt id(s) are
-    //                    copied off that pool. Empty at the start of a chain.
+    //                    copied off that pool's entry. Empty at the start of
+    //                    a chain.
     //   pool_id_out    — the caller's request for the new Pool ID back. Most
     //                    callers have no use for it and pass nothing; one that
     //                    keeps its own record (ProjectIngest) passes where it
-    //                    wants it written. Written only when the pool stands.
+    //                    wants it written. Written only when the pool stands
+    //                    on the map.
     //
     // Nothing is returned. Whether the pool stands is posted to Wellness.
     // Refused — no pool left standing — when the class resolves to nothing,
-    // continues_from names a pool that does not exist, or the first block
-    // cannot be taken.
+    // continues_from names a pool that does not exist, or the first chunk
+    // cannot be taken. A mount that fails after the chunk was taken leaves
+    // the pool in the future layer, with its chunk, and posts that.
     void create(const ClassRef&    cls,
                 const std::string& turn_id,
                 const std::string& continues_from = std::string(),
                 std::string*       pool_id_out    = nullptr);
 
-    // ---- grow and shrink --------------------------------------------------
-    // One more block. False when the pool does not exist or the machine has
-    // no block to give.
+    // ---- grow ---------------------------------------------------------------
+    // One more chunk. False when the pool does not exist, the OS has no chunk
+    // to give, or the mount did not happen — in which last case the chunk is
+    // on the entry in the future layer, and Wellness is told.
     bool grow(const std::string& pool_id);
 
-    // Hand back every block beyond keep_bytes. Blocks holding content a
-    // reader can currently see are never touched; the tail is stopped at
-    // keep_bytes if it pointed past it.
-    void shrink(const std::string& pool_id, std::uint64_t keep_bytes);
-
     // ---- destroy / flag / unflag — one filter, one source ----------------
-    // Each returns how many pools it acted on.
+    // Each returns how many pools it acted on — on the map. A mount that did
+    // not happen is zero acted on, and Wellness is told.
     std::uint64_t destroy(const PoolFilter& filter, const std::string& source);
     std::uint64_t flag   (const PoolFilter& filter, const std::string& source);
     std::uint64_t unflag (const PoolFilter& filter, const std::string& source);
 
     // ---- reclassify --------------------------------------------------------
-    enum class Reclassify { Done, NotFound };
+    enum class Reclassify { Done, NotFound, NotMounted };
 
-    // The new class, as the caller has it. Changes class_id on the pool and
+    // The new class, as the caller has it. Changes Class ID on the entry and
     // nothing else. NotFound when the pool does not exist or the class
-    // resolves to nothing.
+    // resolves to nothing. NotMounted when the edit was made and the mount
+    // did not happen.
     Reclassify reclassify(const std::string& pool_id, const ClassRef& cls);
 
 private:
@@ -217,17 +206,11 @@ private:
     // flag and unflag — the one matcher.
     static bool matches(const Pool& p, const PoolFilter& f);
 
-    // One block onto the end of the pool. Caller holds the lock.
-    bool take_block_locked(Pool& p);
+    // One chunk from the OS onto the end of the pool. Caller holds the lock.
+    bool take_chunk_locked(Pool& p);
 
-    // Every block back to the allocator. Caller holds the lock.
-    void release_blocks_locked(Pool& p);
-
-    MemoryAllocator& mem_;
-
-    // The pools this file is managing memory for: which blocks belong to
-    // which pool. Its own bookkeeping, for its own operations. Not a lookup.
-    std::unordered_map<std::string, std::unique_ptr<Pool>> pools_;
+    // This file's callers, one at a time on the future layer. Not the map's
+    // lock — the map has none; readers never wait.
     mutable std::mutex mutex_;
 };
 
