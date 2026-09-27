@@ -65,4 +65,4 @@ These cover every layer at once, so no single domain owner can hold them:
 
 - FileLoader as it stands in the repo is not the disk gate. It becomes the gate by a rebuild, not an edit.
 - The memory distributor as it stands in the repo is the old allocator, which reserved one large block for itself and shared it out. It becomes the system-wide distributor for RAM and VRAM by a rebuild. On this unified-memory machine, RAM and VRAM are the same physical memory. Each byte carries a RAM or VRAM designation that decides where it is placed and how it is physically optimised, and both sides can read both.
-- Pool Maintenance as it stands in the repo keeps its pools as private bookkeeping and publishes no pool map hub. Watcher refers to the image by name and layout from the hub, so Watcher will not build until Pool Maintenance publishes it.
+- Pool Maintenance as it stands in the repo keeps its pools as private bookkeeping and publishes no pool map hub. Watcher takes the image's name and layout from the hub.
