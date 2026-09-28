@@ -735,47 +735,6 @@ void LiveRegistry::set_class_size_bytes_per_token(uint64_t class_id,
 }
 
 // ---------------------------------------------------------------------------
-// Files — pool -> source file tag. Its own section; the FileController is the
-// only caller. ONE store; file -> pools is a scan of it, never a second map.
-// ---------------------------------------------------------------------------
-
-void LiveRegistry::set_pool_file_tag(const std::string& pool_name,
-                                     const std::string& file) {
-    std::lock_guard<std::mutex> lock(files_mutex_);
-    pool_file_tags_[pool_name] = file;
-}
-
-std::optional<std::string> LiveRegistry::pool_file_tag(
-        const std::string& pool_name) const {
-    std::lock_guard<std::mutex> lock(files_mutex_);
-    auto it = pool_file_tags_.find(pool_name);
-    if (it == pool_file_tags_.end()) return std::nullopt;
-    return it->second;
-}
-
-std::vector<std::string> LiveRegistry::pools_with_file_tag(
-        const std::string& file) const {
-    std::lock_guard<std::mutex> lock(files_mutex_);
-    std::vector<std::string> out;
-    for (const auto& [pool, f] : pool_file_tags_)
-        if (f == file) out.push_back(pool);
-    return out;
-}
-
-void LiveRegistry::clear_pool_file_tag(const std::string& pool_name) {
-    std::lock_guard<std::mutex> lock(files_mutex_);
-    pool_file_tags_.erase(pool_name);
-}
-
-void LiveRegistry::clear_file_tags(const std::string& file) {
-    std::lock_guard<std::mutex> lock(files_mutex_);
-    for (auto it = pool_file_tags_.begin(); it != pool_file_tags_.end();) {
-        if (it->second == file) it = pool_file_tags_.erase(it);
-        else ++it;
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Masking state — co-located registry facts and live records; masking.cpp is
 // the logic over these. Declarations in the header's MASKING section.
 // ---------------------------------------------------------------------------
