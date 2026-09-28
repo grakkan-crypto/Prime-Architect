@@ -6,7 +6,6 @@
 #include "pool_maintenance.h"
 
 #include "id_generation.h"
-#include "watcher.h"   // [[COW-EDIT 52]] the forbidden list, read directly
 
 #include <algorithm>
 #include <chrono>
@@ -28,43 +27,24 @@ std::uint8_t* os_chunk_take();
 void          os_chunk_return(std::uint8_t* chunk);
 
 // ---------------------------------------------------------------------------
-// [[COW-EDIT 21]] Arrive / leave — every read of the map and
+// [[COW-EDIT 21]] Arrive / leave — every read of the map (on the screen) and
 // of a pool's bytes
 // ---------------------------------------------------------------------------
-PoolRead PoolMaintenance::arrive(std::uint64_t unit) {
-    MapUnit* u = unit == kMap ? nullptr : &map_.units[unit];
-    Gate& g = u != nullptr ? u->gate : map_.gate;
+PoolRead PoolMaintenance::arrive(MapUnit* unit) {
+    Gate& g = unit != nullptr ? unit->gate : live_registry().screen->gate;
     std::lock_guard<std::mutex> lock(g.m);
-    // [[COW-EDIT 53]] Full lockdown: a pool on the forbidden list admits no
-    // one, as a flagged or gone pool admits no one.
-    const bool forbidden = u != nullptr && u->present.load(std::memory_order_relaxed) &&
-        watcher().forbidden.load()->count(u->live.pool_id) != 0;
-    // Refused: posted at the instant it is refused.
-    const bool wellness_check_pool_entry_refused = g.closed || forbidden;
+    // A flagged or gone pool: no entry. Posted at the instant it is refused.
+    const bool wellness_check_pool_entry_refused = g.closed;
     (void)wellness_check_pool_entry_refused;
-    if (wellness_check_pool_entry_refused) return {};
-    const std::uint64_t stamp = u != nullptr ? 0 : g.clock;
+    if (g.closed) return {};
+    const std::uint64_t stamp = unit != nullptr ? 0 : g.clock;
     g.holders.insert(stamp);
-    return { u, stamp, true };
+    return { unit, stamp, true };
 }
-
-// [[COW-EDIT 54]] The per-access resolution: the stash this read is pinned
-// to for that unit, if there is one; otherwise live.
-const Pool* PoolMaintenance::read(const PoolRead& r, std::uint64_t unit) const {
-    const MapUnit& u = map_.units[unit];
-    if (r.stamp >= u.live_from.load(std::memory_order_acquire))
-        return u.present.load(std::memory_order_acquire) ? &u.live : nullptr;
-    for (const Stash* s = u.stashes.load(std::memory_order_acquire); s != nullptr;
-         s = s->older.load(std::memory_order_acquire))
-        if (s->from <= r.stamp && r.stamp < s->to) return s->present ? &s->content : nullptr;
-    return nullptr;
-}
-
-std::uint64_t PoolMaintenance::units() const { return map_.unit_count; }
 
 void PoolMaintenance::leave(const PoolRead& read, bool died) {
     if (!read.granted) return;
-    PoolMap& map = map_;
+    PoolMap& map = *live_registry().screen;
     if (read.unit == nullptr) {
         // [[COW-EDIT 44]] Every stash this read is pinned to loses it; at
         // zero, its bytes are released now.
@@ -191,7 +171,7 @@ void PoolMaintenance::create(const ClassRef&    cls,
                 std::chrono::system_clock::now().time_since_epoch()).count());
 
         std::lock_guard<std::mutex> lock(mutex_);
-        PoolMap& map = map_;   // [[COW-EDIT 24]]
+        PoolMap& map = *live_registry().screen;   // [[COW-EDIT 24]] the map, through the screen
 
         // The id chain: prompt id(s) come off the one pool this continues,
         // read off the live map. A continuation naming a pool that is not
@@ -240,7 +220,7 @@ void PoolMaintenance::create(const ClassRef&    cls,
 // ---------------------------------------------------------------------------
 bool PoolMaintenance::grow(const std::string& pool_id) {
     std::lock_guard<std::mutex> lock(mutex_);
-    PoolMap& map = map_;   // [[COW-EDIT 26]]
+    PoolMap& map = *live_registry().screen;   // [[COW-EDIT 26]]
     MapUnit* u = live_unit(map, pool_id);
     if (u == nullptr) return false;
     Pool next = u->live;
@@ -284,7 +264,7 @@ bool PoolMaintenance::matches(const Pool& p, const PoolFilter& f) {
 // ---------------------------------------------------------------------------
 std::uint64_t PoolMaintenance::destroy(const PoolFilter& filter, const std::string& source) {
     std::lock_guard<std::mutex> lock(mutex_);
-    PoolMap& map = map_;
+    PoolMap& map = *live_registry().screen;
     std::uint64_t n = 0;
     for (std::uint64_t i = 0; i < map.unit_count; ++i) {
         MapUnit& u = map.units[i];
@@ -311,7 +291,7 @@ std::uint64_t PoolMaintenance::destroy(const PoolFilter& filter, const std::stri
 
 std::uint64_t PoolMaintenance::flag(const PoolFilter& filter, const std::string& source) {
     std::lock_guard<std::mutex> lock(mutex_);
-    PoolMap& map = map_;
+    PoolMap& map = *live_registry().screen;
     std::uint64_t n = 0;
     for (std::uint64_t i = 0; i < map.unit_count; ++i) {
         MapUnit& u = map.units[i];
@@ -329,7 +309,7 @@ std::uint64_t PoolMaintenance::flag(const PoolFilter& filter, const std::string&
 
 std::uint64_t PoolMaintenance::unflag(const PoolFilter& filter, const std::string& source) {
     std::lock_guard<std::mutex> lock(mutex_);
-    PoolMap& map = map_;
+    PoolMap& map = *live_registry().screen;
     std::uint64_t n = 0;
     for (std::uint64_t i = 0; i < map.unit_count; ++i) {
         MapUnit& u = map.units[i];
@@ -354,7 +334,7 @@ PoolMaintenance::reclassify(const std::string& pool_id, const ClassRef& cls) {
     if (class_id == 0) return Reclassify::NotFound;
 
     std::lock_guard<std::mutex> lock(mutex_);
-    PoolMap& map = map_;   // [[COW-EDIT 28]]
+    PoolMap& map = *live_registry().screen;   // [[COW-EDIT 28]]
     MapUnit* u = live_unit(map, pool_id);
     if (u == nullptr) return Reclassify::NotFound;
     Pool next = u->live;

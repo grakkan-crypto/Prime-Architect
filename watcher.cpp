@@ -6,6 +6,7 @@
 
 #include "watcher.h"
 
+#include "live_registry.h"      // the screen — where the map is read
 #include "pool_maintenance.h"   // [[COW-EDIT 35]] the map's layout; arrive and leave
 #include "text_file.h"          // read_text_file — the plain disk read
 
@@ -18,8 +19,8 @@
 // THE READS WATCHER MAKES (Ruling 9): a pool's content off VRAM; a region of
 // unified memory; a flag a file keeps. A flag or a region that is not there
 // is nullopt. The stop token's text. The map is not declared here: it is
-// read in the loop through a read Pool Maintenance grants; the map is Pool
-// Maintenance's own. [[COW-EDIT 36]]
+// read on the screen on LiveRegistry, in the loop, through an arrival Pool
+// Maintenance grants. [[COW-EDIT 36]]
 // ---------------------------------------------------------------------------
 namespace prime {
 
@@ -413,19 +414,19 @@ void Watcher::run() {
                                          : pool_content_watch_.foreground + pool_content_watch_.background > 0;
         bool forbidden_changed = false;
         std::vector<PoolRecord> map;
-        std::vector<std::uint64_t> map_units; // [[COW-EDIT 32]] the unit each record came from
+        std::vector<MapUnit*>   map_units;   // [[COW-EDIT 32]] the unit each record came from
         PoolRead                map_read;    // [[COW-EDIT 32]]
         PoolView                view;
         if (read_map || read_content) {
-            // [[COW-EDIT 31]] Arrive on the map; copy every record this
+            // [[COW-EDIT 31]] Arrive on the screen; copy every record this
             // read sees into this file's own working copy, unit by unit. The
             // read stays open through the content read below and is left
             // there.
-            map_read = pool_maintenance().arrive();
-            const std::uint64_t units = pool_maintenance().units();
-            map.reserve(units);
-            for (std::uint64_t i = 0; i < units; ++i) {
-                const Pool* p = pool_maintenance().read(map_read, i);
+            map_read = pool_maintenance().arrive(nullptr);
+            PoolMap& pm = *live_registry().screen;
+            map.reserve(pm.unit_count);
+            for (std::uint64_t i = 0; i < pm.unit_count; ++i) {
+                const Pool* p = resolve(pm.units[i], map_read);
                 if (p == nullptr) continue;
                 PoolRecord r;
                 r.id           = p->pool_id;
@@ -435,7 +436,7 @@ void Watcher::run() {
                 r.timestamp_ns = p->timestamp_ns;
                 r.bytes        = p->byte_capacity;
                 map.push_back(std::move(r));
-                map_units.push_back(i);
+                map_units.push_back(&pm.units[i]);
             }
             for (auto it = forbidden_.begin(); it != forbidden_.end();) {
                 bool present = false;
