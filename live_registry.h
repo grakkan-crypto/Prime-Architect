@@ -282,17 +282,47 @@ public:
     std::vector<std::string> linked_pools(const std::string& prompt_id) const;
     void unlink_prompt(const std::string& prompt_id);
 
-    // ---- [[COW-EDIT 29]] the pool map (replaces the screen) ---------------
-    // The pool map, held here. Its layout is stated by Pool Maintenance
-    // (pool_maintenance.h), which alone edits it and alone grants every read
-    // of it. Nothing about it is stated here.
+    // ---- the screen ---------------------------------------------------------
+    // [[COW-EDIT 29]] Screen kept; its outline rewritten for per-unit
+    // copy-on-write, and it now points at the map itself (was: an image).
+    //
+    // Where readers read the pool map. Written only by Pool Maintenance and
+    // the system core. What the map contains and how it is laid out is
+    // stated by the pool map hub, owned by Pool Maintenance. Read it there.
+    // Nothing about it is stated here.
     //
     // OS BUILD OUTLINE — TO BE REMOVED ONCE THE OS IS BUILT.
-    //   1. At system load the OS reserves the map's units as one contiguous
-    //      region, sized from Pool Maintenance's VRAM, and sets this.
-    //   2. A reader that ends without leaving is left for it by the OS, the
-    //      same leave, so no read outlives its reader.
-    PoolMap* pool_map = nullptr;
+    //   1. The pool map belongs to Pool Maintenance, the system's core layer
+    //      for pools. It is one reserved region of units, sized from Pool
+    //      Maintenance's own VRAM. Readers reach it only through the screen.
+    //   2. Arriving: a reader arrives on the screen, and Pool Maintenance,
+    //      granting it, records the reader as a current reader from that
+    //      instant.
+    //   3. A read cannot be passed from one reader to another, taken
+    //      anywhere, or kept beyond its reader.
+    //   4. Reading: on every access, each unit is seen as it stood when the
+    //      reader arrived if it has been edited since, and live otherwise.
+    //   5. Leaving: a reader leaves the screen. A reader that ends without
+    //      leaving is left for, by the same leave.
+    //   6. Editing:
+    //      - Pool Maintenance edits the map directly and never waits on
+    //        readers.
+    //      - An edit touches only the units it changes. Where a current
+    //        reader arrived before the edit, that unit's prior contents are
+    //        kept for it. Only changed units are kept, never synced, and
+    //        each is freed once no reader that arrived before it was
+    //        replaced remains.
+    //      - There is no whole-map image, copy, or freeze.
+    //   7. The screen sits in memory of its own: writable only by Pool
+    //      Maintenance and the system core, read-only to everything else.
+    //   8. A change to the map's layout reaches the screen only once
+    //      Wellness has brought every reader into line with the pool map
+    //      hub.
+    //   9. Dead or stuck readers, and an empty screen, belong to Wellness.
+    //  10. A pool's bytes are read the same way: a reader arrives on the
+    //      pool, is a current reader until it leaves, and a pool flagged for
+    //      destruction admits no one.
+    PoolMap* screen = nullptr;
 
 private:
     // Pipeline-scoped — everything under this lock swaps as one.

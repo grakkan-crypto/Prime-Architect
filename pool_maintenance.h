@@ -10,9 +10,8 @@
 // ###########################################################################
 //
 // ===========================================================================
-// [[COW-EDIT 1]] Preamble replaced with the standard one (was "POOL
-// MAINTENANCE RULES — FIXED POINTS ..."). Rules 8 and 11 rewritten (future
-// layer and mount removed); rules 12 and 13 added.
+// [[COW-EDIT 1]] Preamble replaced with the standard one. Rules 8 and 11
+// rewritten for copy-on-write; rules 12 and 13 added.
 //
 // OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
 // definition. It is raised with the user, never made.
@@ -41,7 +40,8 @@
 //
 // 5. THIS FILE HOLDS NOTHING.
 //    No map, no list, no record of any pool, no copy of the map. The map is
-//    on LiveRegistry; this file states its layout and edits it there. It
+//    on LiveRegistry, read through the screen; this file states its layout
+//    and edits it there. It
 //    offers no lookup, no find, no enumeration of pools by any criterion,
 //    to any caller.
 //
@@ -77,7 +77,7 @@
 //    places it live. A version a present reader can still see is kept, for
 //    that reader alone, until no reader that arrived before it was replaced
 //    remains. No edit ever alters a version a reader can see. There is no
-//    whole-map copy, freeze, or mount anywhere.
+//    whole-map copy or freeze anywhere.
 //
 // 12. THIS FILE GRANTS EVERY READ — OF THE MAP AND OF A POOL'S BYTES.
 //    Arrive and Leave are the only way onto the map or into a pool, and a
@@ -122,7 +122,8 @@
 //   caller is minting.
 //
 // [[COW-EDIT 2]] THE MAP AND ITS READS (new section)
-//   The map is one reserved region of units, one unit per pool position.
+//   Every read of the map is on the screen (live_registry.h). The map is
+//   one reserved region of units, one unit per pool position.
 //   Each unit carries its versions, newest first, each stamped with the
 //   map clock tick at which it went live, and the gate onto that pool's
 //   bytes. The map carries its own gate. A gate is where this file grants
@@ -141,8 +142,7 @@
 //
 // OS_OWES
 //   The marker word (live_registry.h). The OS supplies the chunks; each is
-//   declared where it is called. [[COW-EDIT 3]] The future layer and the
-//   mount are removed.
+//   declared where it is called. [[COW-EDIT 3]]
 
 #pragma once
 
@@ -255,7 +255,7 @@ public:
     PoolMaintenance& operator=(const PoolMaintenance&) = delete;
 
     // ---- [[COW-EDIT 8]] arrive / leave — every read, map or pool ----------
-    // Arrive on the map (null) or on one unit's pool. Refused — not granted —
+    // Arrive on the screen (null) or on one unit's pool. Refused — not granted —
     // when that pool is flagged for destruction or gone. Leave ends the
     // read; the last leave from a flagged pool destroys it.
     PoolRead arrive(MapUnit* unit);
@@ -301,8 +301,7 @@ public:
     std::uint64_t unflag (const PoolFilter& filter, const std::string& source);
 
     // ---- reclassify --------------------------------------------------------
-    // [[COW-EDIT 12]] NotMounted removed — there is no mount.
-    enum class Reclassify { Done, NotFound };
+    enum class Reclassify { Done, NotFound };   // [[COW-EDIT 12]]
 
     // The new class, as the caller has it. Changes Class ID on the entry and
     // nothing else. NotFound when the pool does not exist, is flagged for

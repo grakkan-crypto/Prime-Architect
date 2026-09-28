@@ -6,7 +6,7 @@
 
 #include "watcher.h"
 
-#include "live_registry.h"      // [[COW-EDIT 35]] the pool map is held here (was: the screen)
+#include "live_registry.h"      // the screen — where the map is read
 #include "pool_maintenance.h"   // [[COW-EDIT 35]] the map's layout; arrive and leave
 #include "text_file.h"          // read_text_file — the plain disk read
 
@@ -19,8 +19,8 @@
 // THE READS WATCHER MAKES (Ruling 9): a pool's content off VRAM; a region of
 // unified memory; a flag a file keeps. A flag or a region that is not there
 // is nullopt. The stop token's text. The map is not declared here: it is
-// read through an arrival granted by Pool Maintenance, in the loop.
-// [[COW-EDIT 36]] (was: through the screen)
+// read on the screen on LiveRegistry, in the loop, through an arrival Pool
+// Maintenance grants. [[COW-EDIT 36]]
 // ---------------------------------------------------------------------------
 namespace prime {
 
@@ -418,12 +418,12 @@ void Watcher::run() {
         PoolRead                map_read;    // [[COW-EDIT 32]]
         PoolView                view;
         if (read_map || read_content) {
-            // [[COW-EDIT 31]] Arrive on the map, copy every record this read
-            // sees into this file's own working copy, unit by unit. The read
-            // stays open through the content read below and is left there.
-            // (Was: take the image off the screen.)
+            // [[COW-EDIT 31]] Arrive on the screen; copy every record this
+            // read sees into this file's own working copy, unit by unit. The
+            // read stays open through the content read below and is left
+            // there.
             map_read = pool_maintenance().arrive(nullptr);
-            PoolMap& pm = *live_registry().pool_map;
+            PoolMap& pm = *live_registry().screen;
             map.reserve(pm.unit_count);
             for (std::uint64_t i = 0; i < pm.unit_count; ++i) {
                 const Pool* p = resolve(pm.units[i], map_read);
