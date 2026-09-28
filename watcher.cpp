@@ -422,21 +422,30 @@ void Watcher::run() {
             // read sees into this file's own working copy, unit by unit. The
             // read stays open through the content read below and is left
             // there.
+            // [[COW-EDIT 75]] The key first, once per session; then every
+            // record is read off the screen through it.
+            if (!has_map_key_) {
+                map_key_     = pool_maintenance().map_key();
+                has_map_key_ = true;
+            }
+            const MapKey& k      = map_key_;
+            const void*   screen = live_registry().screen;
             map_read = pool_maintenance().arrive(nullptr);
-            PoolMap& pm = *live_registry().screen;
-            map.reserve(pm.unit_count);
-            for (std::uint64_t i = 0; i < pm.unit_count; ++i) {
-                const Pool* p = resolve(pm.units[i], map_read);
+            map.reserve(k.unit_count);
+            for (std::uint64_t i = 0; i < k.unit_count; ++i) {
+                const std::uint8_t* p = map_record(k, screen, i, map_read.stamp);
                 if (p == nullptr) continue;
                 PoolRecord r;
-                r.id           = p->pool_id;
-                r.class_id     = p->class_id;
-                r.turn_id      = p->turn_id;
-                r.prompt_ids.assign(p->prompt_ids.begin(), p->prompt_ids.end());
-                r.timestamp_ns = p->timestamp_ns;
-                r.bytes        = p->byte_capacity;
+                r.id           = map_field<std::string>(p, k.pool_id);
+                r.class_id     = map_field<std::uint64_t>(p, k.class_id);
+                r.turn_id      = map_field<std::string>(p, k.turn_id);
+                const auto& prompts = map_field<std::set<std::string>>(p, k.prompt_ids);
+                r.prompt_ids.assign(prompts.begin(), prompts.end());
+                r.timestamp_ns = map_field<std::uint64_t>(p, k.timestamp_ns);
+                r.bytes        = map_field<std::uint64_t>(p, k.byte_capacity);
                 map.push_back(std::move(r));
-                map_units.push_back(&pm.units[i]);
+                map_units.push_back(reinterpret_cast<MapUnit*>(
+                    const_cast<std::uint8_t*>(map_unit(k, screen, i))));
             }
             for (auto it = forbidden_.begin(); it != forbidden_.end();) {
                 bool present = false;

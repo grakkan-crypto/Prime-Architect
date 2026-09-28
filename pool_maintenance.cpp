@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>    // [[COW-EDIT 70]] offsetof
 #include <limits>     // [[COW-EDIT 19]]
 
 namespace prime {
@@ -136,6 +137,33 @@ void PoolMaintenance::end_pool_locked(PoolMap& map, MapUnit& u) {
     const std::vector<std::uint8_t*> chunks = u.live.chunks;
     write_unit_locked(map, u, Pool{}, false);                   // the edit: the entry gone
     for (std::uint8_t* c : chunks) os_chunk_return(c);          // OS_OWES
+}
+
+// ---------------------------------------------------------------------------
+// [[COW-EDIT 71]] The map key — this file's layout, stated as positions
+// ---------------------------------------------------------------------------
+MapKey PoolMaintenance::map_key() const {
+    MapKey k;
+    k.units                   = offsetof(PoolMap, units);
+    k.unit_count              = live_registry().screen->unit_count;
+    k.unit_size               = sizeof(MapUnit);
+    k.unit_present            = offsetof(MapUnit, present);
+    k.unit_live_from          = offsetof(MapUnit, live_from);
+    k.unit_stashes            = offsetof(MapUnit, stashes);
+    k.unit_live               = offsetof(MapUnit, live);
+    k.stash_present           = offsetof(Stash, present);
+    k.stash_from              = offsetof(Stash, from);
+    k.stash_to                = offsetof(Stash, to);
+    k.stash_content           = offsetof(Stash, content);
+    k.stash_older             = offsetof(Stash, older);
+    k.pool_id                 = offsetof(Pool, pool_id);
+    k.class_id                = offsetof(Pool, class_id);
+    k.turn_id                 = offsetof(Pool, turn_id);
+    k.prompt_ids              = offsetof(Pool, prompt_ids);
+    k.timestamp_ns            = offsetof(Pool, timestamp_ns);
+    k.byte_capacity           = offsetof(Pool, byte_capacity);
+    k.flagged_for_destruction = offsetof(Pool, flagged_for_destruction);
+    return k;
 }
 
 // ---------------------------------------------------------------------------

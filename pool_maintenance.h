@@ -155,6 +155,10 @@
 //   stashes, each with its own count. Only the units an edit touches are
 //   ever forked.
 //
+//   THE KEY. Before its first visit of the session, a reader asks this
+//   file for the map key and keeps it. It reads the screen only through the
+//   key. [[COW-EDIT 69]]
+//
 //   RESOLUTION, on every access, per unit: the stash this reader is pinned
 //   to for that unit, if there is one; otherwise live. A reader sees live,
 //   except for the units forked out from under it, which it sees as they
@@ -272,14 +276,50 @@ struct PoolRead {
     bool          granted = false;
 };
 
-// [[COW-EDIT 42]] The per-access resolution: this unit as this read sees it.
-// Null when the reader sees no pool there.
-inline const Pool* resolve(const MapUnit& u, const PoolRead& r) {
-    if (r.stamp >= u.live_from.load(std::memory_order_acquire))
-        return u.present.load(std::memory_order_acquire) ? &u.live : nullptr;
-    for (const Stash* s = u.stashes.load(std::memory_order_acquire); s != nullptr;
-         s = s->older.load(std::memory_order_acquire))
-        if (s->from <= r.stamp && r.stamp < s->to) return s->present ? &s->content : nullptr;
+// [[COW-EDIT 64]] THE MAP KEY — how to read the screen. Handed out by Pool
+// Maintenance; a map reader asks for it once, before its first visit of the
+// session, and keeps it. Every position is a byte offset. A reader reads the
+// map only through the key, never through the layout above, so a change to
+// the layout is a change to Pool Maintenance alone.
+struct MapKey {
+    // the map, from the screen
+    std::uint64_t units = 0, unit_count = 0, unit_size = 0;
+    // one unit
+    std::uint64_t unit_present = 0, unit_live_from = 0, unit_stashes = 0, unit_live = 0;
+    // one stash
+    std::uint64_t stash_present = 0, stash_from = 0, stash_to = 0, stash_content = 0, stash_older = 0;
+    // one pool record, live or stashed
+    std::uint64_t pool_id = 0, class_id = 0, turn_id = 0, prompt_ids = 0, timestamp_ns = 0,
+                  byte_capacity = 0, flagged_for_destruction = 0;
+};
+
+// [[COW-EDIT 65]] One field, at the key's offset, as the type the key names it.
+template <class T>
+inline const T& map_field(const std::uint8_t* at, std::uint64_t offset) {
+    return *reinterpret_cast<const T*>(at + offset);
+}
+
+// [[COW-EDIT 66]] The unit at position `unit`, found through the key.
+inline const std::uint8_t* map_unit(const MapKey& k, const void* screen, std::uint64_t unit) {
+    const std::uint8_t* units = map_field<const std::uint8_t*>(static_cast<const std::uint8_t*>(screen), k.units);
+    return units + unit * k.unit_size;
+}
+
+// [[COW-EDIT 67]] The per-access resolution, through the key: the pool
+// record this read sees in that unit — its pinned stash if it has one,
+// otherwise live. Null when it sees no pool there.
+inline const std::uint8_t* map_record(const MapKey& k, const void* screen,
+                                      std::uint64_t unit, std::uint64_t stamp) {
+    const std::uint8_t* u = map_unit(k, screen, unit);
+    if (stamp >= map_field<std::atomic<std::uint64_t>>(u, k.unit_live_from).load(std::memory_order_acquire))
+        return map_field<std::atomic<bool>>(u, k.unit_present).load(std::memory_order_acquire) ? u + k.unit_live : nullptr;
+    for (const std::uint8_t* s = reinterpret_cast<const std::uint8_t*>(
+             map_field<std::atomic<Stash*>>(u, k.unit_stashes).load(std::memory_order_acquire));
+         s != nullptr;
+         s = reinterpret_cast<const std::uint8_t*>(
+             map_field<std::atomic<Stash*>>(s, k.stash_older).load(std::memory_order_acquire)))
+        if (map_field<std::uint64_t>(s, k.stash_from) <= stamp && stamp < map_field<std::uint64_t>(s, k.stash_to))
+            return map_field<bool>(s, k.stash_present) ? s + k.stash_content : nullptr;
     return nullptr;
 }
 
@@ -299,6 +339,10 @@ public:
     // ends the read: every stash it was pinned to loses it, and the last
     // leave from a flagged pool destroys it. `died`: the system leaving for
     // a reader that ended without leaving (DIE). [[COW-EDIT 43]]
+    // [[COW-EDIT 68]] The map key, whole. Asked for once per reader per
+    // session, before its first visit to the screen.
+    MapKey   map_key() const;
+
     PoolRead arrive(MapUnit* unit);
     void     leave(const PoolRead& read, bool died = false);
 

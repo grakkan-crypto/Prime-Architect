@@ -298,6 +298,10 @@ public:
     //      at all times. The screen sits in memory of its own: writable only
     //      by Pool Maintenance and the system core, read-only to everything
     //      else.
+    //   1a. THE KEY. Before its first visit of the session, a reader asks
+    //      Pool Maintenance for the map key and keeps it. It reads the
+    //      screen only through the key, so a change to the map's layout is
+    //      a change to Pool Maintenance alone. [[COW-EDIT 76]]
     //   2. ARRIVE. A reader arrives on the screen and is granted a read: a
     //      live binding, not a copy. Pool Maintenance records it as a
     //      current reader from that instant.
