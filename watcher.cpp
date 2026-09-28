@@ -422,6 +422,10 @@ void Watcher::run() {
             // read sees into this file's own working copy, unit by unit. The
             // read stays open through the content read below and is left
             // there.
+            if (!has_pool_files_) {                    // [[COW-EDIT 63]] once, before the first visit
+                pool_files_     = pool_maintenance().pool_file_table();
+                has_pool_files_ = true;
+            }
             map_read = pool_maintenance().arrive(nullptr);
             PoolMap& pm = *live_registry().screen;
             map.reserve(pm.unit_count);

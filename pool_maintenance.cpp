@@ -134,8 +134,33 @@ MapUnit* PoolMaintenance::live_unit(PoolMap& map, const std::string& pool_id) {
 void PoolMaintenance::end_pool_locked(PoolMap& map, MapUnit& u) {
     if (!u.present.load(std::memory_order_relaxed) || !u.live.flagged_for_destruction) return;
     const std::vector<std::uint8_t*> chunks = u.live.chunks;
+    clear_pool_file_tag(u.live.pool_id);                        // [[COW-EDIT 60]] its tag goes with it
     write_unit_locked(map, u, Pool{}, false);                   // the edit: the entry gone
     for (std::uint8_t* c : chunks) os_chunk_return(c);          // OS_OWES
+}
+
+// ---------------------------------------------------------------------------
+// [[COW-EDIT 59]] The pool-file table
+// ---------------------------------------------------------------------------
+std::map<std::string, std::string> PoolMaintenance::pool_file_table() const {
+    std::lock_guard<std::mutex> lock(files_mutex_);
+    return pool_files_;
+}
+
+void PoolMaintenance::set_pool_file_tag(const std::string& pool_id, const std::string& file) {
+    std::lock_guard<std::mutex> lock(files_mutex_);
+    pool_files_[pool_id] = file;
+}
+
+void PoolMaintenance::clear_pool_file_tag(const std::string& pool_id) {
+    std::lock_guard<std::mutex> lock(files_mutex_);
+    pool_files_.erase(pool_id);
+}
+
+void PoolMaintenance::clear_file_tags(const std::string& file) {
+    std::lock_guard<std::mutex> lock(files_mutex_);
+    for (auto it = pool_files_.begin(); it != pool_files_.end();)
+        it = it->second == file ? pool_files_.erase(it) : std::next(it);
 }
 
 // ---------------------------------------------------------------------------

@@ -19,8 +19,10 @@
 //   previous copy of each source on it — a pool read carrying its own view
 //   of itself by class, turn and prompt, the read seen differently, living
 //   and dying with it — the forbidden list of pools, the published copy of
-//   that list, the queue at the doors, and the requests it refused, kept
-//   for Wellness. Nothing else.
+//   that list, the queue at the doors, the requests it refused, kept for
+//   Wellness, and the pool-file table, asked of Pool Maintenance once before
+//   its first visit to the screen and kept for the session. Nothing else.
+//   [[COW-EDIT 61]]
 //
 // ===========================================================================
 // NAMING
@@ -404,6 +406,11 @@ private:
     // the forbidden list as this file edits it (Ruling 5). Pruned at the
     // read, added to at bookkeeping, published when it changed.
     std::set<std::string>           forbidden_;
+
+    // [[COW-EDIT 62]] The pool-file table, asked of Pool Maintenance once,
+    // before the first visit to the screen, and kept for the session.
+    std::map<std::string, std::string> pool_files_;
+    bool                               has_pool_files_ = false;
 };
 
 // The one instance, there for the life of the process.
