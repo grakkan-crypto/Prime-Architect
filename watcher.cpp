@@ -6,8 +6,8 @@
 
 #include "watcher.h"
 
-#include "live_registry.h"      // the screen — where the map's image is taken
-#include "pool_maintenance.h"   // the pool map hub: the image's name and layout
+#include "live_registry.h"      // [[COW-EDIT 35]] the pool map is held here (was: the screen)
+#include "pool_maintenance.h"   // [[COW-EDIT 35]] the map's layout; arrive and leave
 #include "text_file.h"          // read_text_file — the plain disk read
 
 #include <algorithm>
@@ -19,7 +19,8 @@
 // THE READS WATCHER MAKES (Ruling 9): a pool's content off VRAM; a region of
 // unified memory; a flag a file keeps. A flag or a region that is not there
 // is nullopt. The stop token's text. The map is not declared here: it is
-// read through the screen on LiveRegistry, in the loop.
+// read through an arrival granted by Pool Maintenance, in the loop.
+// [[COW-EDIT 36]] (was: through the screen)
 // ---------------------------------------------------------------------------
 namespace prime {
 
@@ -413,25 +414,29 @@ void Watcher::run() {
                                          : pool_content_watch_.foreground + pool_content_watch_.background > 0;
         bool forbidden_changed = false;
         std::vector<PoolRecord> map;
+        std::vector<MapUnit*>   map_units;   // [[COW-EDIT 32]] the unit each record came from
+        PoolRead                map_read;    // [[COW-EDIT 32]]
         PoolView                view;
         if (read_map || read_content) {
-            // Take the current image off the screen, directly; copy every
-            // record into this file's own working copy; drop the image.
-            {
-                const PoolMapImage& image = *static_cast<const PoolMapImage*>(
-                    live_registry().screen.load(std::memory_order_acquire));
-                map.reserve(image.size());
-                for (const auto& entry : image) {
-                    const Pool& p = *entry.second;
-                    PoolRecord r;
-                    r.id           = p.pool_id;
-                    r.class_id     = p.class_id;
-                    r.turn_id      = p.turn_id;
-                    r.prompt_ids   = p.prompt_ids;
-                    r.timestamp_ns = p.timestamp_ns;
-                    r.bytes        = p.byte_capacity;
-                    map.push_back(std::move(r));
-                }
+            // [[COW-EDIT 31]] Arrive on the map, copy every record this read
+            // sees into this file's own working copy, unit by unit. The read
+            // stays open through the content read below and is left there.
+            // (Was: take the image off the screen.)
+            map_read = pool_maintenance().arrive(nullptr);
+            PoolMap& pm = *live_registry().pool_map;
+            map.reserve(pm.unit_count);
+            for (std::uint64_t i = 0; i < pm.unit_count; ++i) {
+                const Pool* p = resolve(pm.units[i], map_read);
+                if (p == nullptr) continue;
+                PoolRecord r;
+                r.id           = p->pool_id;
+                r.class_id     = p->class_id;
+                r.turn_id      = p->turn_id;
+                r.prompt_ids.assign(p->prompt_ids.begin(), p->prompt_ids.end());
+                r.timestamp_ns = p->timestamp_ns;
+                r.bytes        = p->byte_capacity;
+                map.push_back(std::move(r));
+                map_units.push_back(&pm.units[i]);
             }
             for (auto it = forbidden_.begin(); it != forbidden_.end();) {
                 bool present = false;
@@ -453,9 +458,16 @@ void Watcher::run() {
         }
         if (read_content) {
             content_now_.clear();
-            for (const PoolRecord& p : map) {
+            // [[COW-EDIT 33]] Each pool's bytes are read inside a granted
+            // arrival on that pool. Refused — flagged for destruction or
+            // gone — it is not read.
+            for (std::size_t i = 0; i < map.size(); ++i) {
+                const PoolRecord& p = map[i];
                 if (forbidden_.count(p.id)) continue;
+                const PoolRead pool_read = pool_maintenance().arrive(map_units[i]);
+                if (!pool_read.granted) continue;
                 content_now_.emplace(p.id, WatcherItem{ pool_content(p), p });
+                pool_maintenance().leave(pool_read);
             }
             // Content is the map less the forbidden; so is its view. Nothing
             // is classified a second time.
@@ -469,6 +481,7 @@ void Watcher::run() {
             less_forbidden(view.by_turn,   content_view_now_.by_turn);
             less_forbidden(view.by_prompt, content_view_now_.by_prompt);
         }
+        pool_maintenance().leave(map_read);   // [[COW-EDIT 34]] the map read ends; ungranted is a no-op
         for (const auto& [name, w] : flags_)
             if (asleep ? w.background > 0 : true) flags_now_[name] = single(flag_value(name));
         for (const auto& [path, w] : files_)

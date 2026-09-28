@@ -61,6 +61,8 @@
 
 namespace prime {
 
+struct PoolMap;   // [[COW-EDIT 30]] laid out in pool_maintenance.h
+
 // ===========================================================================
 // THE KEY — WHAT EVERY PERMISSION AND MASK BIT MEANS
 //
@@ -280,46 +282,17 @@ public:
     std::vector<std::string> linked_pools(const std::string& prompt_id) const;
     void unlink_prompt(const std::string& prompt_id);
 
-    // ---- the screen ---------------------------------------------------------
-    // Where readers find the current image of the pool map. Written only by
-    // Pool Maintenance and the system core.
-    //
-    // The screen holds the current image of the pool map. What the image
-    // is called, what it contains, and how it is laid out, is stated by the
-    // pool map hub, owned by Pool Maintenance. Read it there. Nothing about
-    // it is stated here.
+    // ---- [[COW-EDIT 29]] the pool map (replaces the screen) ---------------
+    // The pool map, held here. Its layout is stated by Pool Maintenance
+    // (pool_maintenance.h), which alone edits it and alone grants every read
+    // of it. Nothing about it is stated here.
     //
     // OS BUILD OUTLINE — TO BE REMOVED ONCE THE OS IS BUILT.
-    //   1. The pool map belongs to Pool Maintenance, the system's core layer
-    //      for pools. No reader ever has access to the map itself.
-    //   2. The screen always holds the image of the latest complete version
-    //      of the map.
-    //   3. Arriving: a reader takes the image from the screen, without
-    //      calling anything. Taking it counts as arriving, and the system
-    //      core records the reader as holding that version.
-    //   4. One image per reader: a reader holds one image at a time, and
-    //      taking a new one drops the old. Images cannot be passed from one
-    //      reader to another.
-    //   5. Leaving: a reader drops its image, without sending a message. When
-    //      the last holder of a version drops it and that version is no
-    //      longer on the screen, the version is freed.
-    //   6. Editing:
-    //      - Pool Maintenance edits the map directly, from memory reserved to
-    //        it at all times, and never waits on readers.
-    //      - Before any block of the map changes, the system core keeps that
-    //        block's current contents aside for every version still held.
-    //        Only the changed blocks are kept, never synced, and they are
-    //        freed with their version.
-    //      - While the edit runs, the screen keeps the last complete version.
-    //      - When the edit is complete, Pool Maintenance puts the new version
-    //        on the screen itself.
-    //   7. The screen sits in memory of its own: writable only by Pool
-    //      Maintenance and the system core, read-only to everything else.
-    //   8. A change to the image's name or layout reaches the screen only
-    //      once Wellness has brought every reader into line with the pool
-    //      map hub.
-    //   9. Dead or stuck holders, and an empty screen, belong to Wellness.
-    std::atomic<const void*> screen{nullptr};
+    //   1. At system load the OS reserves the map's units as one contiguous
+    //      region, sized from Pool Maintenance's VRAM, and sets this.
+    //   2. A reader that ends without leaving is left for it by the OS, the
+    //      same leave, so no read outlives its reader.
+    PoolMap* pool_map = nullptr;
 
 private:
     // Pipeline-scoped — everything under this lock swaps as one.
