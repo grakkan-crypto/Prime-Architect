@@ -73,11 +73,14 @@
 //    hardcoded here in its place.
 //
 // 11. EVERY EDIT IS COPY-ON-WRITE, PER UNIT, AND NEVER WAITS ON A READER.
-//    An edit writes a new version of exactly the units it touches and
-//    places it live. A version a present reader can still see is kept, for
-//    that reader alone, until no reader that arrived before it was replaced
-//    remains. No edit ever alters a version a reader can see. There is no
-//    whole-map copy or freeze anywhere.
+//    [[COW-EDIT 37]] An edit touches only the units it changes. A unit no
+//    present reader is pinned to is written in place, with no copy. A unit
+//    that readers already present are pinned to has its pre-edit content
+//    copied once into a stash, those readers are pinned to the stash, and
+//    the edit is written live. A stash is held for exactly the readers
+//    pinned to it and its bytes are released the instant the last of them
+//    leaves. There is no whole-map copy, snapshot, or freeze anywhere, and
+//    no edit ever waits, checks for permission, or holds.
 //
 // 12. THIS FILE GRANTS EVERY READ — OF THE MAP AND OF A POOL'S BYTES.
 //    Arrive and Leave are the only way onto the map or into a pool, and a
@@ -90,6 +93,13 @@
 //    on it. Readers already in it carry on unrestricted. When the last one
 //    leaves, the pool leaves the map and its chunks are released. Nothing
 //    else pre-empts or brings forward a destruction.
+//
+// 14. THE MAP IS ONE CONTIGUOUS REGION OF FIXED-SIZE UNITS. [[COW-EDIT 38]]
+//    The map is the set of pools: a pool's unit holding it and the pool
+//    existing are the same fact. No second store, no log, no derivation.
+//    Ownership runs strictly downward: map, unit, chunk list, bytes. The map
+//    never holds pool bytes, and nothing here ever copies them; a stash is
+//    a copy of a unit, never of a pool's bytes.
 // ===========================================================================
 //
 // WHAT A POOL IS
@@ -121,20 +131,38 @@
 //   pool alone, undoes nothing already standing, and stops nothing else a
 //   caller is minting.
 //
-// [[COW-EDIT 2]] THE MAP AND ITS READS (new section)
-//   Every read of the map is on the screen (live_registry.h). The map is
-//   one reserved region of units, one unit per pool position.
-//   Each unit carries its versions, newest first, each stamped with the
-//   map clock tick at which it went live, and the gate onto that pool's
-//   bytes. The map carries its own gate. A gate is where this file grants
-//   arrivals and knows every reader present.
-//   Arriving on the map stamps the reader with the clock. Every access
-//   resolves each unit separately: the newest version that went live no
-//   later than the reader's stamp. A reader therefore sees live, except for
-//   units edited since it arrived, where it sees what was there when it
-//   arrived.
-//   A pool's gate is the same gate. Destroy closes it; a closed gate refuses
-//   every arrival.
+// [[COW-EDIT 2]] THE MAP AND ITS READS (new section) — rewritten to the
+// copy-on-write spec [[COW-EDIT 39]]
+//   Every read of the map is on the screen (live_registry.h). No third path
+//   to the map exists.
+//
+//   ARRIVE. A reader arrives on the screen and is granted a read: a live
+//   binding, not a copy. Its stamp is the map clock at that instant.
+//   LEAVE. The reader releases its read. Every stash it is pinned to loses
+//   one reader; a stash left with none has its bytes released at once.
+//   DIE. A reader that ends without leaving is left for by the system, the
+//   same leave, detected without the reader's cooperation.
+//   A read is not transferable, not storable, not kept beyond its reader.
+//   The map cannot be taken anywhere, only read.
+//
+//   EDIT, per unit touched. The clock ticks. The readers pinned to live —
+//   present, arrived since this unit was last forked — are counted.
+//     None: the edit is written in place.
+//     Some: the pre-edit content is copied once into a stash carrying that
+//     count and the span of stamps it serves; those readers are now pinned
+//     to it; then the edit is written live.
+//   Several edits to one unit while older readers remain give several
+//   stashes, each with its own count. Only the units an edit touches are
+//   ever forked.
+//
+//   RESOLUTION, on every access, per unit: the stash this reader is pinned
+//   to for that unit, if there is one; otherwise live. A reader sees live,
+//   except for the units forked out from under it, which it sees as they
+//   were when it arrived.
+//
+//   A pool's bytes are gated the same way: a reader arrives on the pool, is
+//   a current reader until it leaves, and a pool flagged for destruction
+//   admits no one.
 //
 // WELLNESS
 //   Bare booleans, named for what they answer, set at the instant they are
@@ -181,7 +209,7 @@ struct PoolFilter {
 // Pool / PoolMap / PoolMapImage but defined nowhere; defined here.
 // ===========================================================================
 
-// One pool: the whole of one unit's content.
+// One pool: the whole of one unit's content. No generation marker.
 struct Pool {
     std::string                pool_id;
     std::uint64_t              class_id     = 0;
@@ -194,54 +222,65 @@ struct Pool {
     bool                       flagged_for_destruction = false;   // [[COW-EDIT 6]]
 };
 
-// Where reads are granted. The map has one; every unit has one for its
+// Where reads are granted. The screen has one; every unit has one for its
 // pool's bytes. `holders` is every reader present, by stamp.
 struct Gate {
     std::mutex                   m;
-    std::uint64_t                clock  = 0;   // the map's gate only
+    std::uint64_t                clock  = 0;   // the screen's gate only
     std::multiset<std::uint64_t> holders;
     bool                         closed = false;
 };
 
-// One version of one unit. Never altered once live.
-struct PoolVersion {
-    Pool          pool;
-    bool          present = false;   // false: no pool in this unit
-    std::uint64_t born    = 0;       // clock tick it went live
-    std::uint64_t retired = 0;       // clock tick it was replaced
-    PoolVersion*  older   = nullptr;
+// [[COW-EDIT 40]] A stash: one unit's pre-edit content, held for the readers
+// present when the edit came — those stamped in [from, to). `pinned` is how
+// many of them still hold their read. At zero its bytes are released; the
+// empty stash itself goes once no reader stamped before `to` remains.
+struct Stash {
+    Pool                content;
+    bool                present = false;
+    std::uint64_t       from    = 0;
+    std::uint64_t       to      = 0;
+    std::uint64_t       pinned  = 0;
+    std::atomic<Stash*> older{nullptr};
 };
 
-// One unit: one pool position.
+// [[COW-EDIT 41]] One unit: one pool position, fixed size, in the region.
+// Its live content is written in place. Readers stamped at or after
+// `live_from` see live; earlier readers see their stash.
 struct MapUnit {
-    std::atomic<PoolVersion*> head{nullptr};
-    Gate                      gate;
+    Pool                       live;
+    std::atomic<bool>          present{false};
+    std::atomic<std::uint64_t> live_from{0};
+    std::atomic<Stash*>        stashes{nullptr};   // newest first
+    Gate                       gate;
 };
 
 // [[COW-EDIT 7 | PROVISIONAL — unit granularity, spec default: one unit =
 // one pool record + its chunk list]]. The units are the one contiguous
-// region; versions are held apart from it.
+// region.
 struct PoolMap {
-    MapUnit*                  units      = nullptr;
-    std::uint64_t             unit_count = 0;
-    Gate                      gate;
-    std::vector<PoolVersion*> retired;   // replaced, still visible to a reader
+    MapUnit*      units      = nullptr;
+    std::uint64_t unit_count = 0;
+    Gate          gate;
 };
 
 // A granted read. Not copyable to anyone else's use; it is the reader's own.
-// `unit` null: a read of the map. `granted` false: refused.
+// `unit` null: a read of the map, on the screen. `granted` false: refused.
 struct PoolRead {
     MapUnit*      unit    = nullptr;
     std::uint64_t stamp   = 0;
     bool          granted = false;
 };
 
-// The per-access resolution: this unit as this map read sees it. Null when
-// the reader sees no pool there.
+// [[COW-EDIT 42]] The per-access resolution: this unit as this read sees it.
+// Null when the reader sees no pool there.
 inline const Pool* resolve(const MapUnit& u, const PoolRead& r) {
-    const PoolVersion* v = u.head.load(std::memory_order_acquire);
-    while (v != nullptr && v->born > r.stamp) v = v->older;
-    return v != nullptr && v->present ? &v->pool : nullptr;
+    if (r.stamp >= u.live_from.load(std::memory_order_acquire))
+        return u.present.load(std::memory_order_acquire) ? &u.live : nullptr;
+    for (const Stash* s = u.stashes.load(std::memory_order_acquire); s != nullptr;
+         s = s->older.load(std::memory_order_acquire))
+        if (s->from <= r.stamp && r.stamp < s->to) return s->present ? &s->content : nullptr;
+    return nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,11 +294,13 @@ public:
     PoolMaintenance& operator=(const PoolMaintenance&) = delete;
 
     // ---- [[COW-EDIT 8]] arrive / leave — every read, map or pool ----------
-    // Arrive on the screen (null) or on one unit's pool. Refused — not granted —
-    // when that pool is flagged for destruction or gone. Leave ends the
-    // read; the last leave from a flagged pool destroys it.
+    // Arrive on the screen (null) or on one unit's pool. Refused — not
+    // granted — when that pool is flagged for destruction or gone. Leave
+    // ends the read: every stash it was pinned to loses it, and the last
+    // leave from a flagged pool destroys it. `died`: the system leaving for
+    // a reader that ended without leaving (DIE). [[COW-EDIT 43]]
     PoolRead arrive(MapUnit* unit);
-    void     leave(const PoolRead& read);
+    void     leave(const PoolRead& read, bool died = false);
 
     // ---- create: the moment of need --------------------------------------
     // Mint a pool NOW, with its first chunk. One call for every pool.
@@ -320,8 +361,9 @@ private:
     // One chunk from the OS onto the end of the pool. Caller holds the lock.
     bool take_chunk_locked(Pool& p);
 
-    // [[COW-EDIT 13]] The one edit: a new version of one unit goes live.
-    // Caller holds the lock.
+    // [[COW-EDIT 13]] The one edit, per unit: forked into a stash only where
+    // present readers are pinned to live, then written live. Caller holds
+    // the lock.
     void write_unit_locked(PoolMap& map, MapUnit& u, Pool next, bool present);
 
     // [[COW-EDIT 14]] The unit holding this pool, live and not flagged for
@@ -332,8 +374,8 @@ private:
     // is closed and empty. Caller holds the lock. Used by destroy and leave.
     void end_pool_locked(PoolMap& map, MapUnit& u);
 
-    // [[COW-EDIT 16]] Versions no present map reader can see are released.
-    // Caller holds the map gate.
+    // [[COW-EDIT 16]] Empty stashes no present reader can reach are dropped.
+    // Caller holds the screen's gate.
     static void release_unseen(PoolMap& map);
 
     // This file's callers, one at a time on the map. Not the map's lock —

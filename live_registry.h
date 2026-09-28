@@ -283,41 +283,40 @@ public:
     void unlink_prompt(const std::string& prompt_id);
 
     // ---- the screen ---------------------------------------------------------
-    // [[COW-EDIT 29]] Screen kept; its outline rewritten for per-unit
-    // copy-on-write, and it now points at the map itself (was: an image).
+    // [[COW-EDIT 29]] Rewritten to the copy-on-write spec. The screen is the
+    // pool map, hosted here, and the one place it is read.
     //
     // Where readers read the pool map. Written only by Pool Maintenance and
     // the system core. What the map contains and how it is laid out is
-    // stated by the pool map hub, owned by Pool Maintenance. Read it there.
-    // Nothing about it is stated here.
+    // stated by Pool Maintenance (pool_maintenance.h), which alone edits it
+    // and alone grants every read of it. Read it there. Nothing about it is
+    // stated here.
     //
     // OS BUILD OUTLINE — TO BE REMOVED ONCE THE OS IS BUILT.
-    //   1. The pool map belongs to Pool Maintenance, the system's core layer
-    //      for pools. It is one reserved region of units, sized from Pool
-    //      Maintenance's own VRAM. Readers reach it only through the screen.
-    //   2. Arriving: a reader arrives on the screen, and Pool Maintenance,
-    //      granting it, records the reader as a current reader from that
-    //      instant.
-    //   3. A read cannot be passed from one reader to another, taken
-    //      anywhere, or kept beyond its reader.
-    //   4. Reading: on every access, each unit is seen as it stood when the
-    //      reader arrived if it has been edited since, and live otherwise.
-    //   5. Leaving: a reader leaves the screen. A reader that ends without
-    //      leaving is left for, by the same leave.
-    //   6. Editing:
-    //      - Pool Maintenance edits the map directly and never waits on
-    //        readers.
-    //      - An edit touches only the units it changes. Where a current
-    //        reader arrived before the edit, that unit's prior contents are
-    //        kept for it. Only changed units are kept, never synced, and
-    //        each is freed once no reader that arrived before it was
-    //        replaced remains.
-    //      - There is no whole-map image, copy, or freeze.
-    //   7. The screen sits in memory of its own: writable only by Pool
-    //      Maintenance and the system core, read-only to everything else.
+    //   1. HOSTING. The map is held here as one reserved, contiguous region,
+    //      partitioned into fixed-size units, reserved to Pool Maintenance
+    //      at all times. The screen sits in memory of its own: writable only
+    //      by Pool Maintenance and the system core, read-only to everything
+    //      else.
+    //   2. ARRIVE. A reader arrives on the screen and is granted a read: a
+    //      live binding, not a copy. Pool Maintenance records it as a
+    //      current reader from that instant.
+    //   3. LEAVE. A reader releases its read. Every stash it was pinned to
+    //      loses one reader.
+    //   4. DIE. A reader that ends without leaving is detected without its
+    //      cooperation and left for, the same leave.
+    //   5. No read is transferable, serialisable, or kept beyond its reader.
+    //      The map cannot be taken anywhere, only read. There is no third
+    //      path to it.
+    //   6. RESOLUTION, per unit, per access: the stash this reader is pinned
+    //      to for that unit, if there is one; otherwise live.
+    //   7. STASHES. Held here beside the units they came from, one per fork,
+    //      each counting the readers pinned to it. At zero its bytes are
+    //      released at once. No stash is ever the map; there is no assembled
+    //      whole-map snapshot anywhere.
     //   8. A change to the map's layout reaches the screen only once
-    //      Wellness has brought every reader into line with the pool map
-    //      hub.
+    //      Wellness has brought every reader into line with Pool
+    //      Maintenance's statement of it.
     //   9. Dead or stuck readers, and an empty screen, belong to Wellness.
     //  10. A pool's bytes are read the same way: a reader arrives on the
     //      pool, is a current reader until it leaves, and a pool flagged for

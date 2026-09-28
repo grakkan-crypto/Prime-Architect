@@ -27,7 +27,8 @@ std::uint8_t* os_chunk_take();
 void          os_chunk_return(std::uint8_t* chunk);
 
 // ---------------------------------------------------------------------------
-// [[COW-EDIT 21]] Arrive / leave — every read of the map and of a pool
+// [[COW-EDIT 21]] Arrive / leave — every read of the map (on the screen) and
+// of a pool's bytes
 // ---------------------------------------------------------------------------
 PoolRead PoolMaintenance::arrive(MapUnit* unit) {
     Gate& g = unit != nullptr ? unit->gate : live_registry().screen->gate;
@@ -41,12 +42,27 @@ PoolRead PoolMaintenance::arrive(MapUnit* unit) {
     return { unit, stamp, true };
 }
 
-void PoolMaintenance::leave(const PoolRead& read) {
+void PoolMaintenance::leave(const PoolRead& read, bool died) {
     if (!read.granted) return;
     PoolMap& map = *live_registry().screen;
     if (read.unit == nullptr) {
+        // [[COW-EDIT 44]] Every stash this read is pinned to loses it; at
+        // zero, its bytes are released now.
         std::lock_guard<std::mutex> lock(map.gate.m);
         map.gate.holders.erase(map.gate.holders.find(read.stamp));
+        bool was_pinned = false;
+        for (std::uint64_t i = 0; i < map.unit_count; ++i)
+            for (Stash* st = map.units[i].stashes.load(std::memory_order_relaxed); st != nullptr;
+                 st = st->older.load(std::memory_order_relaxed))
+                if (st->from <= read.stamp && read.stamp < st->to) {
+                    was_pinned = true;
+                    if (--st->pinned == 0) st->content = Pool{};      // the bytes released
+                    break;
+                }
+        // A reader died while pinned to one or more stashes. Posted at the
+        // instant it is known.
+        const bool wellness_check_pool_map_reader_died_pinned = died && was_pinned;
+        (void)wellness_check_pool_map_reader_died_pinned;
         release_unseen(map);
         return;
     }
@@ -63,54 +79,61 @@ void PoolMaintenance::leave(const PoolRead& read) {
 }
 
 // ---------------------------------------------------------------------------
-// [[COW-EDIT 22]] The one edit, and release
+// [[COW-EDIT 22]] The one edit, per unit — copy-on-write
 // ---------------------------------------------------------------------------
 void PoolMaintenance::write_unit_locked(PoolMap& map, MapUnit& u, Pool next, bool present) {
-    PoolVersion* v = new PoolVersion{ std::move(next), present, 0, 0, nullptr };
     std::lock_guard<std::mutex> lock(map.gate.m);
-    PoolVersion* old = u.head.load(std::memory_order_relaxed);
-    const std::uint64_t s = ++map.gate.clock;
-    v->born  = s;
-    v->older = old;
-    // A reader present now sees the replaced version and keeps it.
-    // Informational, not a failure.
-    const bool wellness_check_pool_map_forked =
-        old != nullptr && map.gate.holders.lower_bound(old->born) != map.gate.holders.end();
+    const std::uint64_t from = u.live_from.load(std::memory_order_relaxed);
+    const std::uint64_t to   = ++map.gate.clock;
+    // Readers pinned to live: present, and arrived since this unit was last
+    // forked.
+    std::uint64_t pinned = 0;
+    for (auto it = map.gate.holders.lower_bound(from); it != map.gate.holders.end(); ++it) ++pinned;
+    // A fork occurred for this edit. Informational, not a failure.
+    const bool wellness_check_pool_map_forked = pinned != 0;
     (void)wellness_check_pool_map_forked;
-    u.head.store(v, std::memory_order_release);
-    if (old != nullptr) {
-        old->retired = s;
-        map.retired.push_back(old);
+    if (pinned != 0) {
+        Stash* st   = new Stash;
+        st->content = u.live;                                        // the one copy, pre-edit
+        st->present = u.present.load(std::memory_order_relaxed);
+        st->from    = from;
+        st->to      = to;
+        st->pinned  = pinned;
+        st->older.store(u.stashes.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        u.stashes.store(st, std::memory_order_release);              // pinned before the write
     }
-    release_unseen(map);
+    u.live_from.store(to, std::memory_order_release);
+    u.live = std::move(next);                                        // written live, in place
+    u.present.store(present, std::memory_order_release);
 }
 
 void PoolMaintenance::release_unseen(PoolMap& map) {
-    // A version is seen by a reader stamped before it was replaced; none
-    // left, it goes. [[COW-EDIT 23 | DEVIATION FROM SPEC §4 — released once
-    // no reader that arrived before it was replaced remains, not at an exact
-    // per-fork count of zero. A reader walking to an older version passes
-    // over newer ones; this keeps those from being freed under it.]]
+    // An emptied stash is reached only by readers stamped before its `to`;
+    // once none remain, it and everything older on its unit are dropped.
     const std::uint64_t oldest = map.gate.holders.empty()
         ? std::numeric_limits<std::uint64_t>::max() : *map.gate.holders.begin();
-    auto keep = std::remove_if(map.retired.begin(), map.retired.end(),
-        [oldest](PoolVersion* v) { if (v->retired > oldest) return false; delete v; return true; });
-    map.retired.erase(keep, map.retired.end());
+    for (std::uint64_t i = 0; i < map.unit_count; ++i) {
+        std::atomic<Stash*>* link = &map.units[i].stashes;
+        Stash* st = link->load(std::memory_order_relaxed);
+        while (st != nullptr && st->to > oldest) { link = &st->older; st = link->load(std::memory_order_relaxed); }
+        link->store(nullptr, std::memory_order_release);
+        while (st != nullptr) { Stash* o = st->older.load(std::memory_order_relaxed); delete st; st = o; }
+    }
 }
 
 MapUnit* PoolMaintenance::live_unit(PoolMap& map, const std::string& pool_id) {
     for (std::uint64_t i = 0; i < map.unit_count; ++i) {
-        const PoolVersion* v = map.units[i].head.load(std::memory_order_relaxed);
-        if (v != nullptr && v->present && !v->pool.flagged_for_destruction && v->pool.pool_id == pool_id)
-            return &map.units[i];
+        MapUnit& u = map.units[i];
+        if (u.present.load(std::memory_order_relaxed) && !u.live.flagged_for_destruction &&
+            u.live.pool_id == pool_id)
+            return &u;
     }
     return nullptr;
 }
 
 void PoolMaintenance::end_pool_locked(PoolMap& map, MapUnit& u) {
-    const PoolVersion* v = u.head.load(std::memory_order_relaxed);
-    if (v == nullptr || !v->present || !v->pool.flagged_for_destruction) return;
-    const std::vector<std::uint8_t*> chunks = v->pool.chunks;
+    if (!u.present.load(std::memory_order_relaxed) || !u.live.flagged_for_destruction) return;
+    const std::vector<std::uint8_t*> chunks = u.live.chunks;
     write_unit_locked(map, u, Pool{}, false);                   // the edit: the entry gone
     for (std::uint8_t* c : chunks) os_chunk_return(c);          // OS_OWES
 }
@@ -157,21 +180,19 @@ void PoolMaintenance::create(const ClassRef&    cls,
         if (!continues_from.empty()) {
             MapUnit* from = live_unit(map, continues_from);
             if (from == nullptr) chain_ok = false;
-            else p.prompt_ids = from->head.load(std::memory_order_relaxed)->pool.prompt_ids;
+            else p.prompt_ids = from->live.prompt_ids;
         }
 
-        // [[COW-EDIT 25]] A free unit: never used, or emptied before every
-        // map reader present arrived — none of them can still see what was
-        // there, so none can reach its gate.
+        // [[COW-EDIT 25]] A free unit: empty, with no stash left on it — no
+        // reader can still see a pool that stood there, so none can reach
+        // its gate.
         MapUnit* free_unit = nullptr;
         if (chain_ok) {
             std::lock_guard<std::mutex> gate(map.gate.m);
-            const std::uint64_t oldest = map.gate.holders.empty()
-                ? std::numeric_limits<std::uint64_t>::max() : *map.gate.holders.begin();
-            for (std::uint64_t i = 0; i < map.unit_count && free_unit == nullptr; ++i) {
-                const PoolVersion* v = map.units[i].head.load(std::memory_order_relaxed);
-                if (v == nullptr || (!v->present && v->born <= oldest)) free_unit = &map.units[i];
-            }
+            for (std::uint64_t i = 0; i < map.unit_count && free_unit == nullptr; ++i)
+                if (!map.units[i].present.load(std::memory_order_relaxed) &&
+                    map.units[i].stashes.load(std::memory_order_relaxed) == nullptr)
+                    free_unit = &map.units[i];
         }
         // No free unit: posted at the instant it is known.
         const bool wellness_check_pool_map_full = chain_ok && free_unit == nullptr;
@@ -202,7 +223,7 @@ bool PoolMaintenance::grow(const std::string& pool_id) {
     PoolMap& map = *live_registry().screen;   // [[COW-EDIT 26]]
     MapUnit* u = live_unit(map, pool_id);
     if (u == nullptr) return false;
-    Pool next = u->head.load(std::memory_order_relaxed)->pool;
+    Pool next = u->live;
     if (!take_chunk_locked(next)) return false;
     write_unit_locked(map, *u, std::move(next), true);   // the edit: one chunk appended
     return true;
@@ -247,9 +268,8 @@ std::uint64_t PoolMaintenance::destroy(const PoolFilter& filter, const std::stri
     std::uint64_t n = 0;
     for (std::uint64_t i = 0; i < map.unit_count; ++i) {
         MapUnit& u = map.units[i];
-        const PoolVersion* v = u.head.load(std::memory_order_relaxed);
-        if (v == nullptr || !v->present || v->pool.flagged_for_destruction) continue;
-        const Pool& p = v->pool;
+        if (!u.present.load(std::memory_order_relaxed) || u.live.flagged_for_destruction) continue;
+        const Pool& p = u.live;
         const bool immune =
             std::find(p.immune_from.begin(), p.immune_from.end(), source) != p.immune_from.end();
         if (!matches(p, filter) || immune) continue;
@@ -275,13 +295,12 @@ std::uint64_t PoolMaintenance::flag(const PoolFilter& filter, const std::string&
     std::uint64_t n = 0;
     for (std::uint64_t i = 0; i < map.unit_count; ++i) {
         MapUnit& u = map.units[i];
-        const PoolVersion* v = u.head.load(std::memory_order_relaxed);
-        if (v == nullptr || !v->present || v->pool.flagged_for_destruction) continue;
-        if (!matches(v->pool, filter)) continue;
+        if (!u.present.load(std::memory_order_relaxed) || u.live.flagged_for_destruction) continue;
+        if (!matches(u.live, filter)) continue;
         ++n;
-        if (std::find(v->pool.immune_from.begin(), v->pool.immune_from.end(), source)
-            != v->pool.immune_from.end()) continue;
-        Pool next = v->pool;
+        if (std::find(u.live.immune_from.begin(), u.live.immune_from.end(), source)
+            != u.live.immune_from.end()) continue;
+        Pool next = u.live;
         next.immune_from.push_back(source);
         write_unit_locked(map, u, std::move(next), true);          // the edit
     }
@@ -294,14 +313,13 @@ std::uint64_t PoolMaintenance::unflag(const PoolFilter& filter, const std::strin
     std::uint64_t n = 0;
     for (std::uint64_t i = 0; i < map.unit_count; ++i) {
         MapUnit& u = map.units[i];
-        const PoolVersion* v = u.head.load(std::memory_order_relaxed);
-        if (v == nullptr || !v->present || v->pool.flagged_for_destruction) continue;
-        if (!matches(v->pool, filter)) continue;
+        if (!u.present.load(std::memory_order_relaxed) || u.live.flagged_for_destruction) continue;
+        if (!matches(u.live, filter)) continue;
         ++n;
-        const auto pos = std::find(v->pool.immune_from.begin(), v->pool.immune_from.end(), source);
-        if (pos == v->pool.immune_from.end()) continue;
-        Pool next = v->pool;
-        next.immune_from.erase(next.immune_from.begin() + (pos - v->pool.immune_from.begin()));
+        const auto pos = std::find(u.live.immune_from.begin(), u.live.immune_from.end(), source);
+        if (pos == u.live.immune_from.end()) continue;
+        Pool next = u.live;
+        next.immune_from.erase(next.immune_from.begin() + (pos - u.live.immune_from.begin()));
         write_unit_locked(map, u, std::move(next), true);          // the edit
     }
     return n;
@@ -319,7 +337,7 @@ PoolMaintenance::reclassify(const std::string& pool_id, const ClassRef& cls) {
     PoolMap& map = *live_registry().screen;   // [[COW-EDIT 28]]
     MapUnit* u = live_unit(map, pool_id);
     if (u == nullptr) return Reclassify::NotFound;
-    Pool next = u->head.load(std::memory_order_relaxed)->pool;
+    Pool next = u->live;
     next.class_id = class_id;
     write_unit_locked(map, *u, std::move(next), true);   // the edit
     return Reclassify::Done;
