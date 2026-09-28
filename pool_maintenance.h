@@ -38,11 +38,8 @@
 //    changes nothing else — no cascading writes, no side effects, no reach
 //    into any other file's state.
 //
-// 5. THIS FILE HOLDS NOTHING BUT THE POOL-FILE TABLE. [[COW-EDIT 55]]
-//    The pool-file table — which source file each pool's content came
-//    from — is held here and nowhere else; a map reader asks for it whole,
-//    once, before its first visit of the session, and keeps it. Beyond it:
-//    no map, no list, no record of any pool, no copy of the map. The map is
+// 5. THIS FILE HOLDS NOTHING.
+//    No map, no list, no record of any pool, no copy of the map. The map is
 //    on LiveRegistry, read through the screen; this file states its layout
 //    and edits it there. It
 //    offers no lookup, no find, no enumeration of pools by any criterion,
@@ -181,7 +178,6 @@
 
 #include <atomic>     // [[COW-EDIT 4]]
 #include <cstdint>
-#include <map>        // [[COW-EDIT 56]]
 #include <mutex>
 #include <optional>
 #include <set>        // [[COW-EDIT 4]]
@@ -306,16 +302,6 @@ public:
     PoolRead arrive(MapUnit* unit);
     void     leave(const PoolRead& read, bool died = false);
 
-    // ---- [[COW-EDIT 57]] the pool-file table — Pool ID -> source file ----
-    // Handed whole to a map reader, once, before its first visit of the
-    // session; the reader keeps it. Tags are written by the FileLoader in
-    // the mint motion; setting replaces. A pool's tag goes when the pool
-    // is destroyed.
-    std::map<std::string, std::string> pool_file_table() const;
-    void set_pool_file_tag(const std::string& pool_id, const std::string& file);
-    void clear_pool_file_tag(const std::string& pool_id);
-    void clear_file_tags(const std::string& file);
-
     // ---- create: the moment of need --------------------------------------
     // Mint a pool NOW, with its first chunk. One call for every pool.
     //
@@ -391,10 +377,6 @@ private:
     // [[COW-EDIT 16]] Empty stashes no present reader can reach are dropped.
     // Caller holds the screen's gate.
     static void release_unseen(PoolMap& map);
-
-    // [[COW-EDIT 58]] The pool-file table.
-    mutable std::mutex                 files_mutex_;
-    std::map<std::string, std::string> pool_files_;
 
     // This file's callers, one at a time on the map. Not the map's lock —
     // the map has none; readers never wait on an edit.
