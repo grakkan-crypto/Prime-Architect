@@ -6,12 +6,14 @@
 #include "pool_maintenance.h"
 #include "watcher.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <mutex>
 #include <set>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace prime {
 
@@ -27,6 +29,10 @@ MapKey         key;
 // The prompt ID of the newest pool.
 std::string held;
 
+// The prompt agents: every agent with write access on an input pool, each
+// once. Held for the pipeline's lifespan.
+std::vector<std::string> prompt_agents;
+
 // A pool ID's sequence number: what follows its last '-'.
 std::uint64_t sequence(const std::string& pool_id) {
     return std::strtoull(pool_id.c_str() + pool_id.rfind('-') + 1, nullptr, 10);
@@ -35,11 +41,18 @@ std::uint64_t sequence(const std::string& pool_id) {
 } // namespace
 
 void ContextMatcher_Watch() {
+    prompt_agents.clear();
     for (const char* pool : kInputPools) {
         const std::uint64_t class_id = live_registry().class_id_for(pool);
         const bool wellness_check_context_matcher_class_found = class_id != 0;
         (void)wellness_check_context_matcher_class_found;
         if (class_id == 0) continue;
+
+        const PoolDeclaration d = live_registry().pool(pool)->declaration;
+        for (const PoolAgent& a : d.agents)
+            if (permission_key::bit_set(a.bits, permission_key::write_bit(d.mask_count)) &&
+                std::find(prompt_agents.begin(), prompt_agents.end(), a.agent) == prompt_agents.end())
+                prompt_agents.push_back(a.agent);
 
         Entry e;
         e.kind                     = SourceKind::PoolMap;

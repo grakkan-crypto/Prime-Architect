@@ -20,6 +20,10 @@
 //   ContextMatcher so no other registrant can collide with it. The message
 //   is the bare name, which is the token LiveRegistry answers to.
 //
+//   At registration the prompt agents are found: every agent with write
+//   access on an input pool, by name, as many as there are. They are held
+//   for the pipeline's lifespan.
+//
 //   On a delivery, the input pool named by the message is turned back into
 //   its class ID through LiveRegistry, and the pool map is read on the
 //   screen for the newest pool of that class: the one with the greatest
@@ -29,7 +33,8 @@
 //   The map is read only through the map key. The key is asked of Pool
 //   Maintenance once, before this file's first visit to the screen in the
 //   session, and held for the rest of the session. Between deliveries this
-//   file holds the key and the held prompt ID, nothing else.
+//   file holds the key, the prompt agents and the held prompt ID, nothing
+//   else.
 //
 // ===========================================================================
 // OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
@@ -79,7 +84,12 @@
 //    Pool IDs of a kind only ever increase. An input pool carries exactly
 //    one prompt ID.
 //
-// 10. CONTEXTMATCHER OWNS NO POOL.
+// 10. A PROMPT AGENT IS AN AGENT WITH WRITE ACCESS ON AN INPUT POOL.
+//     It is read from the pipeline's permission table and never named here.
+//     It is identified by agent name alone, never by model: agents share
+//     models. The list is replaced whole at every registration.
+//
+// 11. CONTEXTMATCHER OWNS NO POOL.
 //    It does not create, write, migrate, or destroy any pool. It reads and
 //    it links. Pool Maintenance owns the pool; LiveRegistry holds the links.
 //
