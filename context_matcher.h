@@ -22,13 +22,15 @@
 //
 //   On a delivery, the input pool named by the message is turned back into
 //   its class ID through LiveRegistry, and the pool map is read on the
-//   screen for every pool of that class and the prompt IDs each carries.
-//   The work runs apart from the receipt; Watcher is never kept waiting.
+//   screen for the newest pool of that class: the one with the greatest
+//   pool ID, pool IDs being sequential. Its one prompt ID is held, one per
+//   input pool, replaced by the next. The work runs apart from the receipt;
+//   Watcher is never kept waiting.
 //
 //   The map is read only through the map key. The key is asked of Pool
 //   Maintenance once, before this file's first visit to the screen in the
 //   session, and held for the rest of the session. Between deliveries this
-//   file holds the key and nothing else.
+//   file holds the key and the held prompt IDs, nothing else.
 //
 // ===========================================================================
 // OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
@@ -74,7 +76,16 @@
 //    never carried to the next delivery, never handed to anyone. What was
 //    copied out is a working copy for that one delivery, gone with it.
 //
-// 9. CONTEXTMATCHER OWNS NO POOL.
+// 9. THE NEWEST POOL IS THE ONE WITH THE GREATEST POOL ID.
+//    Pool IDs of a kind only ever increase. Prompt IDs increase but need
+//    not be consecutive, so a prompt ID is never used to find the pool. An
+//    input pool carries exactly one prompt ID.
+//
+// 10. ONE PROMPT ID IS HELD PER INPUT POOL.
+//     The newest replaces the last; nothing accumulates. A held prompt ID is
+//     written only here.
+//
+// 11. CONTEXTMATCHER OWNS NO POOL.
 //    It does not create, write, migrate, or destroy any pool. It reads and
 //    it links. Pool Maintenance owns the pool; LiveRegistry holds the links.
 //
