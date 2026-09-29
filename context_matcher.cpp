@@ -8,7 +8,6 @@
 
 #include <cstdint>
 #include <cstdlib>
-#include <map>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -25,11 +24,8 @@ constexpr const char* kInputPools[] = { "ANALYST_INPUT", "ADEPT_INPUT" };
 std::once_flag key_once;
 MapKey         key;
 
-// The prompt ID of the newest pool in each input pool, by registry name.
-// Each delivery's work runs whole under the lock, so the last to run has read
-// the newest map.
-std::mutex                         held_mutex;
-std::map<std::string, std::string> held;
+// The prompt ID of the newest pool.
+std::string held;
 
 // A pool ID's sequence number: what follows its last '-'.
 std::uint64_t sequence(const std::string& pool_id) {
@@ -67,8 +63,6 @@ void ContextMatcher_Watch() {
 
 bool ContextMatcher_Receive(const std::string&, const std::string& message) {
     std::thread([pool = message]() {
-        std::lock_guard<std::mutex> lock(held_mutex);
-
         const std::uint64_t class_id = live_registry().class_id_for(pool);
         const bool wellness_check_context_matcher_class_found = class_id != 0;
         (void)wellness_check_context_matcher_class_found;
@@ -97,7 +91,7 @@ bool ContextMatcher_Receive(const std::string&, const std::string& message) {
 
         const bool wellness_check_context_matcher_class_on_map = newest != nullptr;
         (void)wellness_check_context_matcher_class_on_map;
-        if (newest != nullptr) held[pool] = std::move(prompt);
+        if (newest != nullptr) held = std::move(prompt);
     }).detach();
     return true;
 }
