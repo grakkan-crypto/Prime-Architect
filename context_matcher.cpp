@@ -3,10 +3,15 @@
 #include "context_matcher.h"
 
 #include "live_registry.h"
+#include "pool_maintenance.h"
 #include "watcher.h"
 
 #include <cstdint>
+#include <mutex>
+#include <set>
+#include <thread>
 #include <utility>
+#include <vector>
 
 namespace prime {
 
@@ -14,6 +19,15 @@ namespace {
 
 // The input pools the matching serves, by registry name (coder.cpp).
 constexpr const char* kInputPools[] = { "ANALYST_INPUT", "ADEPT_INPUT" };
+
+// The map key: asked for once, before the first visit of the session, held.
+std::once_flag key_once;
+MapKey         key;
+
+struct Arrived {
+    std::string              pool_id;
+    std::vector<std::string> prompt_ids;
+};
 
 } // namespace
 
@@ -44,7 +58,33 @@ void ContextMatcher_Watch() {
     }
 }
 
-bool ContextMatcher_Receive(const std::string&, const std::string&) {
+bool ContextMatcher_Receive(const std::string&, const std::string& message) {
+    std::thread([pool = message]() {
+        const std::uint64_t class_id = live_registry().class_id_for(pool);
+        const bool wellness_check_context_matcher_class_found = class_id != 0;
+        (void)wellness_check_context_matcher_class_found;
+        if (class_id == 0) return;
+
+        std::call_once(key_once, [] { key = pool_maintenance().map_key(); });
+        const void* screen = live_registry().screen;
+
+        std::vector<Arrived> arrived;
+        const PoolRead read = pool_maintenance().arrive(nullptr);
+        const bool wellness_check_context_matcher_map_read_granted = read.granted;
+        (void)wellness_check_context_matcher_map_read_granted;
+        if (read.granted)
+            for (std::uint64_t i = 0; i < key.unit_count; ++i) {
+                const std::uint8_t* p = map_record(key, screen, i, read.stamp);
+                if (p == nullptr || map_field<std::uint64_t>(p, key.class_id) != class_id) continue;
+                const auto& prompts = map_field<std::set<std::string>>(p, key.prompt_ids);
+                arrived.push_back({ map_field<std::string>(p, key.pool_id),
+                                    { prompts.begin(), prompts.end() } });
+            }
+        pool_maintenance().leave(read);
+
+        const bool wellness_check_context_matcher_class_on_map = !arrived.empty();
+        (void)wellness_check_context_matcher_class_on_map;
+    }).detach();
     return true;
 }
 

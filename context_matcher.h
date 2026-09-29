@@ -20,6 +20,16 @@
 //   ContextMatcher so no other registrant can collide with it. The message
 //   is the bare name, which is the token LiveRegistry answers to.
 //
+//   On a delivery, the input pool named by the message is turned back into
+//   its class ID through LiveRegistry, and the pool map is read on the
+//   screen for every pool of that class and the prompt IDs each carries.
+//   The work runs apart from the receipt; Watcher is never kept waiting.
+//
+//   The map is read only through the map key. The key is asked of Pool
+//   Maintenance once, before this file's first visit to the screen in the
+//   session, and held for the rest of the session. Between deliveries this
+//   file holds the key and nothing else.
+//
 // ===========================================================================
 // OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
 // definition. It is raised with the user, never made.
@@ -52,7 +62,19 @@
 //    is mechanical and immediate. Whatever needs the pool itself reads the
 //    map; nothing is asked of Watcher and nothing is sent back.
 //
-// 7. CONTEXTMATCHER OWNS NO POOL.
+// 7. THE MAP KEY IS ASKED FOR ONCE A SESSION AND HELD.
+//    It is taken from Pool Maintenance before the first visit to the screen
+//    and before no other; every read of the map goes through it. It is never
+//    asked for again in the session, never passed on, never edited here.
+//    The map is never read through its layout.
+//
+// 8. A MAP READ IS ARRIVED, USED AND LEFT, EVERY TIME.
+//    Each delivery arrives on the screen, copies out what it needs, and
+//    leaves before anything else is done with it. A read is never kept,
+//    never carried to the next delivery, never handed to anyone. What was
+//    copied out is a working copy for that one delivery, gone with it.
+//
+// 9. CONTEXTMATCHER OWNS NO POOL.
 //    It does not create, write, migrate, or destroy any pool. It reads and
 //    it links. Pool Maintenance owns the pool; LiveRegistry holds the links.
 //
