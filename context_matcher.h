@@ -29,7 +29,7 @@
 //   The map is read only through the map key. The key is asked of Pool
 //   Maintenance once, before this file's first visit to the screen in the
 //   session, and held for the rest of the session. Between deliveries this
-//   file holds the key and the held prompt IDs, nothing else.
+//   file holds the key and the held prompt ID, nothing else.
 //
 // ===========================================================================
 // OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
