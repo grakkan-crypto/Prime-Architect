@@ -40,10 +40,11 @@
 //
 // 5. THIS FILE HOLDS THE MAP, AND IT NEVER LEAVES.
 //    The map is held here and nowhere else. No copy of it, or of any part of
-//    it, is held anywhere. LiveRegistry holds the screen: one address per
-//    unit and nothing else, written by this file alone. This file states the
-//    map's layout. It offers no lookup, no find, no enumeration of pools by
-//    any criterion, to any caller.
+//    it, is held anywhere. The map appears on the screen, on LiveRegistry:
+//    this file's own memory, shown there, not a copy. This file alone
+//    changes what the screen shows. This file states the map's layout. It
+//    offers no lookup, no find, no enumeration of pools by any criterion, to
+//    any caller.
 //
 // 6. ONE FILTER, NO VARIANTS.
 //    Destroy, Flag, and Unflag share the one filter shape — Class ID, Turn
@@ -72,21 +73,20 @@
 //    and never written onto an entry. No byte count is ever invented or
 //    hardcoded here in its place.
 //
-// 11. EVERY EDIT IS BUILT APART, THEN SWAPPED, PER UNIT, AND NEVER WAITS.
+// 11. EVERY EDIT IS BUILT APART, THEN SWITCHED, PER UNIT, AND NEVER WAITS.
 //    [[COW-EDIT 37]] An edit touches only the units it changes. A unit's new
 //    content is built complete in memory of its own; the live content and
-//    the screen are not touched while it is built. The screen's address for
-//    that unit is then replaced in one indivisible store. Content is never
-//    written once it can be read. The content replaced is kept where it is,
-//    unchanged, never copied, and released once no read begun before the
-//    swap can still be on it. There is no whole-map copy, snapshot, or
+//    the screen are not touched while it is built. The screen is then
+//    switched to show it, in one step. Content is never written once it can
+//    be read. The content replaced is kept where it is, unchanged, never
+//    copied, and released once no read begun before the switch can still be
+//    on it. There is no whole-map copy, snapshot, or
 //    freeze anywhere, and no edit ever waits, checks for permission, or
 //    holds.
 //
 // 12. A READ OF THE MAP IS NEVER GRANTED, COUNTED, OR NOTICED HERE.
-//    A reader reads a unit's address off the screen, then the content at
-//    that address, on every access. It never calls, asks, or tells this file
-//    anything to do so. A read of a pool's bytes is granted here: Arrive and
+//    A reader reads the map on the screen, on every access. It never calls,
+//    asks, or tells this file anything to do so. A read of a pool's bytes is granted here: Arrive and
 //    Leave are the only way into a pool, and that read is exactly the span
 //    between them. A read cannot be taken anywhere, passed on, or kept
 //    beyond its reader.
@@ -135,24 +135,21 @@
 //
 // [[COW-EDIT 2]] THE MAP AND ITS READS (new section) — rewritten to the
 // copy-on-write spec [[COW-EDIT 39]]
-//   The map is held here. The screen, on LiveRegistry, holds one address per
-//   unit: where that unit's live content is. Every read of the map is on the
-//   screen. No other path to the map exists. The map cannot be taken
-//   anywhere, only read.
+//   The map is held here, and appears on the screen, on LiveRegistry: the
+//   same memory, not a copy. Every read of the map is on the screen. No
+//   other path to the map exists. The map cannot be taken anywhere, only
+//   read.
 //
-//   READ, every access, per unit: the address is read off the screen, then
-//   the content at that address. Nothing is asked of this file, told to it,
-//   or counted by it. A reader never holds an address from one access to
-//   the next.
+//   READ, every access, per unit: the content is read where it appears on
+//   the screen. Nothing is asked of this file, told to it, or counted by it.
 //
 //   EDIT, per unit touched, one edit at a time:
 //     BUILD. The complete new content is written into memory of its own. The
 //     live content and the screen are not touched.
-//     SWAP. The screen's address for the unit is replaced by the new
-//     content's, in one indivisible store. A reader gets the old address or
-//     the new, never part of either, and complete content either way.
+//     SWITCH. The screen is switched to show the new content, in one step.
+//     A reader sees the old content or the new, whole, never part of either.
 //     RETIRE. The content replaced is kept where it is, unchanged, and
-//     released once no read begun before the swap can still be on it.
+//     released once no read begun before the switch can still be on it.
 //
 //   THE KEY. Before its first visit of the session, a reader asks this
 //   file for the map key and keeps it. It reads the screen only through the
@@ -230,10 +227,11 @@ struct Gate {
     bool                         closed = false;
 };
 
-// [[COW-EDIT 41]] One unit: one pool position, fixed size. Its content is
-// reached through its address on the screen, never held here.
+// [[COW-EDIT 41]] One unit: one pool position, fixed size. `live` is its
+// content, the content the screen shows for it. Null: no pool.
 struct MapUnit {
-    Gate gate;
+    const Pool* live = nullptr;
+    Gate        gate;
 };
 
 // [[COW-EDIT 7 | PROVISIONAL — unit granularity, spec default: one unit =
@@ -242,10 +240,6 @@ struct PoolMap {
     MapUnit*      units      = nullptr;
     std::uint64_t unit_count = 0;
 };
-
-// One address on the screen: where one unit's live content is. Nothing
-// else. Null: no pool on that unit.
-using ScreenSlot = std::atomic<const Pool*>;
 
 // A granted read of a pool's bytes. Not copyable to anyone else's use; it is
 // the reader's own. `granted` false: refused.
@@ -262,7 +256,7 @@ struct PoolRead {
 // the layout is a change to Pool Maintenance alone.
 struct MapKey {
     // the screen
-    std::uint64_t unit_count = 0;
+    std::uint64_t unit_count = 0, unit_size = 0;
     // one pool record
     std::uint64_t pool_id = 0, class_id = 0, turn_id = 0, prompt_ids = 0, timestamp_ns = 0,
                   byte_capacity = 0, flagged_for_destruction = 0;
@@ -274,11 +268,10 @@ inline const T& map_field(const std::uint8_t* at, std::uint64_t offset) {
     return *reinterpret_cast<const T*>(at + offset);
 }
 
-// [[COW-EDIT 67]] One access to one unit: the address off the screen, which
-// is the pool record there. Null when there is no pool there.
-inline const std::uint8_t* map_record(const void* screen, std::uint64_t unit) {
-    return reinterpret_cast<const std::uint8_t*>(
-        static_cast<const ScreenSlot*>(screen)[unit].load(std::memory_order_acquire));
+// [[COW-EDIT 67]] One access to one unit: the pool record where it appears
+// on the screen, found through the key.
+inline const std::uint8_t* map_record(const MapKey& k, const void* screen, std::uint64_t unit) {
+    return static_cast<const std::uint8_t*>(screen) + unit * k.unit_size;
 }
 
 // ---------------------------------------------------------------------------
@@ -363,8 +356,8 @@ private:
     bool take_chunk_locked(Pool& p);
 
     // [[COW-EDIT 13]] The one edit, per unit: the new content built apart,
-    // the unit's address on the screen swapped to it, the content replaced
-    // retired. Caller holds the lock.
+    // the screen switched to show it, the content replaced retired. Caller
+    // holds the lock.
     void write_unit_locked(PoolMap& map, MapUnit& u, Pool next, bool present);
 
     // [[COW-EDIT 14]] The unit holding this pool, live and not flagged for
