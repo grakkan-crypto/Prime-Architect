@@ -27,20 +27,30 @@
 //   On a delivery, the input pool named by the message is turned back into
 //   its class ID through LiveRegistry, and the pool map is read on the
 //   screen for the newest pool of that class: the one with the greatest
-//   pool ID, pool IDs being sequential. Its one prompt ID is held. The work
-//   runs apart from the receipt; Watcher is never kept waiting.
+//   pool ID, pool IDs being sequential. Its one prompt ID is held, and a new
+//   row for it, with no pools, is written to LiveRegistry's prompt links.
+//   The work runs apart from the receipt; Watcher is never kept waiting.
 //
 //   Every generation step of a prompt agent delivers its Class 1 attention,
 //   split by KVBuilder's overlay of the pool sections: the step's total to
 //   Class 1, and its attention to each Class 1 pool, labelled with the
 //   pool's ID and token length. Each delivered step is evaluated as it
-//   arrives.
+//   arrives, against the held prompt ID.
+//
+//   Each step gives every pool a lift: its share of the step's Class 1
+//   attention divided by its share of Class 1 tokens. One is background. A
+//   pool not yet linked to the held prompt ID is linked once it has enough
+//   lifts to judge and either its mean lift over the most recent ones is
+//   sustained, or it stood out sharply on several of the most recent steps.
+//   A link writes the prompt ID's whole set of pools to LiveRegistry and,
+//   in the same motion, tells Masking the prompt IDs and the pool IDs just
+//   linked. The evaluation starts afresh with each new held prompt ID.
 //
 //   The map is read only through the map key. The key is asked of Pool
 //   Maintenance once, before this file's first visit to the screen in the
 //   session, and held for the rest of the session. Between deliveries this
-//   file holds the key, the prompt agents and the held prompt ID, nothing
-//   else.
+//   file holds the key, the prompt agents, the held prompt ID and the
+//   evaluation's recent lifts per pool, nothing else.
 //
 // ===========================================================================
 // OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
@@ -100,7 +110,16 @@
 //     and never takes attention to anything outside Class 1. What it is
 //     handed is all it evaluates.
 //
-// 12. CONTEXTMATCHER OWNS NO POOL.
+// 12. NO POOL IS LINKED ON A SINGLE READING.
+//     A link is earned over a run of steps, never on one token, and never
+//     before the generation has run long enough to judge.
+//
+// 13. EVERY LINK IS TOLD TO MASKING IN THE SAME MOTION.
+//     A link written to LiveRegistry without Masking being told, or Masking
+//     told of a link not written, is wrong. What Masking is told is the
+//     prompt IDs linked to and the pool IDs just linked, nothing else.
+//
+// 14. CONTEXTMATCHER OWNS NO POOL.
 //    It does not create, write, migrate, or destroy any pool. It reads and
 //    it links. Pool Maintenance owns the pool; LiveRegistry holds the links.
 //

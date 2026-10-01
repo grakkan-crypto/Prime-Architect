@@ -9,11 +9,26 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <deque>
+#include <map>
 #include <mutex>
 #include <set>
 #include <thread>
 #include <utility>
 #include <vector>
+
+// ---------------------------------------------------------------------------
+// BUILD OUTLINE — TO BE REMOVED ONCE MASKING IS BUILT.
+// Masking is told of every link in the same motion as it is written: the
+// prompt IDs linked to and the pool IDs just linked to them. Called exactly
+// as it will exist; its real header replaces this declaration outright.
+// ---------------------------------------------------------------------------
+namespace prime {
+
+void Masking_Link(const std::vector<std::string>& prompt_ids,
+                  const std::vector<std::string>& pool_ids);
+
+} // namespace prime
 
 namespace prime {
 
@@ -32,6 +47,21 @@ std::string held;
 // The prompt agents: every agent with write access on an input pool, each
 // once. Held for the pipeline's lifespan.
 std::vector<std::string> prompt_agents;
+
+// The evaluation of the held prompt ID: the prompt ID being evaluated, and
+// per pool its most recent lifts, oldest first.
+std::string                              evaluating;
+std::map<std::string, std::deque<float>> lifts;
+
+// The evaluation's thresholds. A pool is linked once it has kSettle lifts
+// and either its mean lift over the window reaches kSustained, or at least
+// kStandoutHits of its last kStandoutWindow lifts reach kStandout.
+constexpr std::size_t kSettle        = 8;
+constexpr std::size_t kWindow        = 16;
+constexpr float       kSustained     = 2.5f;
+constexpr float       kStandout      = 10.0f;
+constexpr std::size_t kStandoutWindow = 8;
+constexpr std::size_t kStandoutHits  = 3;
 
 // A pool ID's sequence number: what follows its last '-'.
 std::uint64_t sequence(const std::string& pool_id) {
@@ -104,12 +134,42 @@ bool ContextMatcher_Receive(const std::string&, const std::string& message) {
 
         const bool wellness_check_context_matcher_class_on_map = newest != nullptr;
         (void)wellness_check_context_matcher_class_on_map;
-        if (newest != nullptr) held = std::move(prompt);
+        if (newest == nullptr) return;
+        live_registry().link_prompt(prompt, {});
+        held = std::move(prompt);
     }).detach();
     return true;
 }
 
-void ContextMatcher_Evaluate(const AttentionStep&) {
+void ContextMatcher_Evaluate(const AttentionStep& step) {
+    if (evaluating != held) { evaluating = held; lifts.clear(); }
+    if (evaluating.empty()) return;
+
+    std::uint64_t all = 0;
+    for (const PoolAttention& p : step.pools) all += p.tokens;
+
+    std::vector<std::string> linked = live_registry().linked_pools(evaluating);
+    std::vector<std::string> added;
+    for (const PoolAttention& p : step.pools) {
+        std::deque<float>& w = lifts[p.pool_id];
+        w.push_back(p.tokens != 0 && step.class_total > 0.0f
+                        ? p.weight / step.class_total * static_cast<float>(all) / static_cast<float>(p.tokens)
+                        : 0.0f);
+        if (w.size() > kWindow) w.pop_front();
+        if (w.size() < kSettle || std::find(linked.begin(), linked.end(), p.pool_id) != linked.end()) continue;
+        float       sum  = 0.0f;
+        std::size_t hits = 0;
+        for (std::size_t i = 0; i < w.size(); ++i) {
+            sum += w[i];
+            if (i + kStandoutWindow >= w.size() && w[i] >= kStandout) ++hits;
+        }
+        if (sum / static_cast<float>(w.size()) >= kSustained || hits >= kStandoutHits) added.push_back(p.pool_id);
+    }
+    if (added.empty()) return;
+
+    linked.insert(linked.end(), added.begin(), added.end());
+    live_registry().link_prompt(evaluating, std::move(linked));
+    Masking_Link({ evaluating }, added);
 }
 
 } // namespace prime
