@@ -30,9 +30,11 @@
 //   pool ID, pool IDs being sequential. Its one prompt ID is held. The work
 //   runs apart from the receipt; Watcher is never kept waiting.
 //
-//   Every generation step of a prompt agent delivers its Class 1 attention:
-//   the step's total to Class 1, and its attention to each Class 1 pool,
-//   labelled by pool ID. Each delivered step is evaluated as it arrives.
+//   Every generation step of a prompt agent delivers its Class 1 attention,
+//   split by KVBuilder's overlay of the pool sections: the step's total to
+//   Class 1, and its attention to each Class 1 pool, labelled with the
+//   pool's ID and token length. Each delivered step is evaluated as it
+//   arrives.
 //
 //   The map is read only through the map key. The key is asked of Pool
 //   Maintenance once, before this file's first visit to the screen in the
@@ -109,15 +111,18 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
 namespace prime {
 
-// One generated token's attention to one Class 1 pool.
+// One generated token's attention to one Class 1 pool, and the pool's
+// length in tokens.
 struct PoolAttention {
-    std::string pool_id;
-    float       weight = 0.0f;
+    std::string   pool_id;
+    std::uint64_t tokens = 0;
+    float         weight = 0.0f;
 };
 
 // One generated token's Class 1 attention: its total to Class 1, and its
