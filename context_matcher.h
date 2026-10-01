@@ -93,10 +93,10 @@
 //     It is identified by agent name alone, never by model: agents share
 //     models. The list is replaced whole at every registration.
 //
-// 11. ATTENTION ARRIVES REDUCED, CLASS 1 ONLY, BY POOL ID.
-//     Raw attention weights never reach this file. What arrives is one
-//     generated token's attention to each Class 1 pool and its total to
-//     Class 1. Nothing outside Class 1 is ever seen here.
+// 11. ATTENTION IS TAKEN ONLY AS DELIVERED, NEVER FETCHED.
+//     This file never reads attention for itself, never takes raw weights,
+//     and never takes attention to anything outside Class 1. What it is
+//     handed is all it evaluates.
 //
 // 12. CONTEXTMATCHER OWNS NO POOL.
 //    It does not create, write, migrate, or destroy any pool. It reads and
@@ -136,6 +136,6 @@ bool ContextMatcher_Receive(const std::string& name, const std::string& message)
 
 // One generation step's Class 1 attention, delivered as it is produced and
 // evaluated per token.
-void ContextMatcher_Attention(const AttentionStep& step);
+void ContextMatcher_Evaluate(const AttentionStep& step);
 
 } // namespace prime

@@ -109,7 +109,7 @@ bool ContextMatcher_Receive(const std::string&, const std::string& message) {
     return true;
 }
 
-void ContextMatcher_Attention(const AttentionStep&) {
+void ContextMatcher_Evaluate(const AttentionStep&) {
 }
 
 } // namespace prime
