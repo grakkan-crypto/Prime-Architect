@@ -43,6 +43,9 @@
 //
 // 7. LIVEREGISTRY STORES FACTS ABOUT THE SYSTEM.
 //    If the answer is not clear, it is not a fact, and it does not live here.
+//
+// 8. THE SCREEN IS POOL MAINTENANCE'S MEMORY, DISPLAYED.
+//    LiveRegistry never writes to it, copies it, or interprets it.
 // ===========================================================================
 
 #pragma once
@@ -60,8 +63,6 @@
 #include <vector>
 
 namespace prime {
-
-struct PoolMap;   // [[COW-EDIT 30]] laid out in pool_maintenance.h
 
 // ===========================================================================
 // THE KEY — WHAT EVERY PERMISSION AND MASK BIT MEANS
@@ -283,49 +284,7 @@ public:
     void unlink_prompt(const std::string& prompt_id);
 
     // ---- the screen ---------------------------------------------------------
-    // [[COW-EDIT 29]] Rewritten to the copy-on-write spec. The screen is the
-    // pool map, hosted here, and the one place it is read.
-    //
-    // Where readers read the pool map. Written only by Pool Maintenance and
-    // the system core. What the map contains and how it is laid out is
-    // stated by Pool Maintenance (pool_maintenance.h), which alone edits it
-    // and alone grants every read of it. Read it there. Nothing about it is
-    // stated here.
-    //
-    // OS BUILD OUTLINE — TO BE REMOVED ONCE THE OS IS BUILT.
-    //   1. HOSTING. The map is held here as one reserved, contiguous region,
-    //      partitioned into fixed-size units, reserved to Pool Maintenance
-    //      at all times. The screen sits in memory of its own: writable only
-    //      by Pool Maintenance and the system core, read-only to everything
-    //      else.
-    //   1a. THE KEY. Before its first visit of the session, a reader asks
-    //      Pool Maintenance for the map key and keeps it. It reads the
-    //      screen only through the key, so a change to the map's layout is
-    //      a change to Pool Maintenance alone. [[COW-EDIT 76]]
-    //   2. ARRIVE. A reader arrives on the screen and is granted a read: a
-    //      live binding, not a copy. Pool Maintenance records it as a
-    //      current reader from that instant.
-    //   3. LEAVE. A reader releases its read. Every stash it was pinned to
-    //      loses one reader.
-    //   4. DIE. A reader that ends without leaving is detected without its
-    //      cooperation and left for, the same leave.
-    //   5. No read is transferable, serialisable, or kept beyond its reader.
-    //      The map cannot be taken anywhere, only read. There is no third
-    //      path to it.
-    //   6. RESOLUTION, per unit, per access: the stash this reader is pinned
-    //      to for that unit, if there is one; otherwise live.
-    //   7. STASHES. Held here beside the units they came from, one per fork,
-    //      each counting the readers pinned to it. At zero its bytes are
-    //      released at once. No stash is ever the map; there is no assembled
-    //      whole-map snapshot anywhere.
-    //   8. A change to the map's layout reaches the screen only once
-    //      Wellness has brought every reader into line with Pool
-    //      Maintenance's statement of it.
-    //   9. Dead or stuck readers, and an empty screen, belong to Wellness.
-    //  10. A pool's bytes are read the same way: a reader arrives on the
-    //      pool, is a current reader until it leaves, and a pool flagged for
-    //      destruction admits no one.
-    PoolMap* screen = nullptr;
+    const void* screen = nullptr;
 
 private:
     // Pipeline-scoped — everything under this lock swaps as one.
