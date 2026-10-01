@@ -30,6 +30,10 @@
 //   pool ID, pool IDs being sequential. Its one prompt ID is held. The work
 //   runs apart from the receipt; Watcher is never kept waiting.
 //
+//   Every generation step of a prompt agent delivers its Class 1 attention:
+//   the step's total to Class 1, and its attention to each Class 1 pool,
+//   labelled by pool ID. Each delivered step is evaluated as it arrives.
+//
 //   The map is read only through the map key. The key is asked of Pool
 //   Maintenance once, before this file's first visit to the screen in the
 //   session, and held for the rest of the session. Between deliveries this
@@ -89,7 +93,12 @@
 //     It is identified by agent name alone, never by model: agents share
 //     models. The list is replaced whole at every registration.
 //
-// 11. CONTEXTMATCHER OWNS NO POOL.
+// 11. ATTENTION ARRIVES REDUCED, CLASS 1 ONLY, BY POOL ID.
+//     Raw attention weights never reach this file. What arrives is one
+//     generated token's attention to each Class 1 pool and its total to
+//     Class 1. Nothing outside Class 1 is ever seen here.
+//
+// 12. CONTEXTMATCHER OWNS NO POOL.
 //    It does not create, write, migrate, or destroy any pool. It reads and
 //    it links. Pool Maintenance owns the pool; LiveRegistry holds the links.
 //
@@ -101,8 +110,22 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 namespace prime {
+
+// One generated token's attention to one Class 1 pool.
+struct PoolAttention {
+    std::string pool_id;
+    float       weight = 0.0f;
+};
+
+// One generated token's Class 1 attention: its total to Class 1, and its
+// attention to each Class 1 pool.
+struct AttentionStep {
+    float                      class_total = 0.0f;
+    std::vector<PoolAttention> pools;
+};
 
 // Registers one Watcher request per input pool the registry knows.
 void ContextMatcher_Watch();
@@ -110,5 +133,9 @@ void ContextMatcher_Watch();
 // Watcher's recipient: the request's name and message. The mechanical
 // receipt goes back at once.
 bool ContextMatcher_Receive(const std::string& name, const std::string& message);
+
+// One generation step's Class 1 attention, delivered as it is produced and
+// evaluated per token.
+void ContextMatcher_Attention(const AttentionStep& step);
 
 } // namespace prime

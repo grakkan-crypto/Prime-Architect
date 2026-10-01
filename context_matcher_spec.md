@@ -76,3 +76,17 @@ This means generation runs at full speed with no capture. The re-read costs roug
 ## Parked on
 
 The agent context builder: what builds each agent's context and KV cache, records pool spans, and applies class priority.
+
+## Recorded for the dataset
+
+Everything else about a run is already logged. These three are added, for every fragment.
+
+- **The KV map.** Every Class 1 section the prompt agent could see while writing the fragment:
+  - the section's pool ID;
+  - its length in tokens;
+  - its position;
+  - for a section that joined during generation, the step at which it joined.
+- **Per-token, per-pool figures.** For each generated token: the Class 1 attention from that token to each pool, after the layer and head reduction.
+  - They are kept per token, not only as totals, so any future scoring rule can be run over past data.
+  - A 500-token fragment against 30 pools is about 60 KB.
+- **The per-step total.** For each generated token, its total attention to Class 1. Class 1 is all ContextMatcher sees, so this is the baseline lift is measured against, and lift can be recalculated exactly from the record.
