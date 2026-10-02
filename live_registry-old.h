@@ -349,19 +349,6 @@ public:
     std::optional<uint64_t> pool_size_bytes_per_token(const std::string& pool_name) const;
     void set_pool_size_bytes_per_token(const std::string& pool_name, uint64_t bytes);
 
-    // ---- files (pool -> source file tag) — its own section entirely ---------
-    // Which file a pool's content traces back to. Written and read ONLY by
-    // the FileController; data here, logic there. One tag per pool; setting
-    // replaces. Generic by design: a project source file, a rules file,
-    // anything on disk a pool mirrors — one mechanism, no domain column.
-    // NOT part of the pool table above (name/permissions/size) — its own
-    // concern, in its own league.
-    void set_pool_file_tag(const std::string& pool_name, const std::string& file);
-    std::optional<std::string> pool_file_tag(const std::string& pool_name) const;
-    std::vector<std::string> pools_with_file_tag(const std::string& file) const;
-    void clear_pool_file_tag(const std::string& pool_name);
-    void clear_file_tags(const std::string& file);
-
     // ==== MASKING — state co-located here; masking.cpp is the logic ====
 
     // ==== load-declared masking facts (written once from the pipeline
@@ -493,12 +480,6 @@ private:
     std::unordered_map<std::string, std::vector<std::string>> prompt_links_;
     mutable std::mutex pool_table_mutex_;
     std::unordered_map<std::string, uint64_t> pool_sizes_;
-
-    // Files — its own store, own lock. pool name -> file tag. ONE map; the
-    // reverse question (file -> pools) is a scan of this one store, never a
-    // second map kept in step with it.
-    mutable std::mutex files_mutex_;
-    std::unordered_map<std::string, std::string> pool_file_tags_;
 
     mutable std::mutex mask_mutex_;
 

@@ -3,29 +3,17 @@
 // ===========================================================================
 // SCOPE — EXACTLY THIS, AND NOTHING BEYOND IT
 //
-//   LiveRegistry holds the live facts of the running system and hands them
-//   back unchanged to whoever asks. It holds:
-//
-//     - the loaded pipeline's name
-//     - the loaded pipeline's roster: the agent names, as declared
-//     - the loaded pipeline's pool table: every declared pool, its mask
-//       triggers, its agents and their permission bits, verbatim from the
-//       pipeline payload, each carrying the class id this registry assigned
-//     - the temperature values committed onto it
-//     - the rebuttal switch, and who to tell when it flips
-//     - prompt links: which pools a prompt is generating into
-//     - pool-file tags: which source file a minted pool came from
-//
-//   and it carries THE KEY — the one statement of what every permission and
-//   mask bit means, so that no reader and no future pipeline author has to
-//   guess.
+//   LiveRegistry is the single collection of active system state, read by
+//   multiple sources. It answers "what interchangeable thing is happening
+//   right now?". It does not participate. It is the system noticeboard for
+//   current state.
 //
 //   It does not read disk. It does not resolve anything for another file.
 //   It does not validate. It does not derive. It does not decide.
 //
 // ===========================================================================
-// OFFICIAL RULINGS — FIXED POINTS. A change that would break one of these is
-// wrong by definition and is raised with the user instead of made.
+// OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
+// definition and is never made.
 //
 // 1. LIVEREGISTRY SORTS AND ORGANISES; IT DOES NOT COMPUTE.
 //    Reserving a known name's fixed number, or counting sequentially through
@@ -55,6 +43,9 @@
 //
 // 7. LIVEREGISTRY STORES FACTS ABOUT THE SYSTEM.
 //    If the answer is not clear, it is not a fact, and it does not live here.
+//
+// 8. THE SCREEN IS POOL MAINTENANCE'S MEMORY, DISPLAYED.
+//    LiveRegistry never writes to it, copies it, or interprets it.
 // ===========================================================================
 
 #pragma once
@@ -292,13 +283,8 @@ public:
     std::vector<std::string> linked_pools(const std::string& prompt_id) const;
     void unlink_prompt(const std::string& prompt_id);
 
-    // ---- pool-file tags — Pool ID -> source file -----------------------------
-    // ONE store; file -> pools is a scan of it, never a second map.
-    void set_pool_file_tag(const std::string& pool_id, const std::string& file);
-    std::optional<std::string> pool_file_tag(const std::string& pool_id) const;
-    std::vector<std::string>   pools_with_file_tag(const std::string& file) const;
-    void clear_pool_file_tag(const std::string& pool_id);
-    void clear_file_tags(const std::string& file);
+    // ---- the screen ---------------------------------------------------------
+    const void* screen = nullptr;
 
 private:
     // Pipeline-scoped — everything under this lock swaps as one.
@@ -316,10 +302,6 @@ private:
     // Prompt links
     mutable std::mutex                                  links_mutex_;
     std::map<std::string, std::vector<std::string>>     prompt_links_;
-
-    // Pool-file tags
-    mutable std::mutex                 files_mutex_;
-    std::map<std::string, std::string> pool_file_tags_;
 };
 
 // ===========================================================================
@@ -328,7 +310,7 @@ private:
 
 // The single live whiteboard. It exists from SYSTEM load — created when the
 // program comes up, not when a pipeline does. It is the live registry of the
-// system; the pipeline is simply all it happens to hold so far. Whoever
+// system; the pipeline is one of the things it holds. Whoever
 // needs it calls it directly, here, and calls its operations on it.
 LiveRegistry& live_registry();
 
