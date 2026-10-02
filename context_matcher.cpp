@@ -124,17 +124,15 @@ bool ContextMatcher_Receive(const std::string&, const std::string& message) {
     const std::uint8_t* newest = nullptr;
     std::uint64_t       seq    = 0;
     std::string         prompt;
-    const PoolRead read = pool_maintenance().arrive(nullptr);
     for (std::uint64_t i = 0; i < key.unit_count; ++i) {
-        const std::uint8_t* p = map_record(key, screen, i, read.stamp);
-        if (p == nullptr || map_field<std::uint64_t>(p, key.class_id) != class_id) continue;
+        const std::uint8_t* p = map_record(key, screen, i);
+        if (map_field<std::uint64_t>(p, key.class_id) != class_id) continue;
         const std::uint64_t n = sequence(map_field<std::string>(p, key.pool_id));
         if (newest != nullptr && n <= seq) continue;
         newest = p;
         seq    = n;
         prompt = *map_field<std::set<std::string>>(p, key.prompt_ids).begin();
     }
-    pool_maintenance().leave(read);
 
     live_registry().link_prompt(prompt, {});
     held = std::move(prompt);
