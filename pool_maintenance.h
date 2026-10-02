@@ -89,23 +89,22 @@
 //    and never written onto an entry. No byte count is ever invented or
 //    hardcoded here in its place.
 //
-// 11. EVERY EDIT IS BUILT APART, THEN SWITCHED, PER UNIT, AND NEVER WAITS.
-//    An edit touches only the units it changes. A unit's new
-//    content is built complete in memory of its own; the live content and
-//    the screen are not touched while it is built. The screen is then
-//    switched to show it, in one step. Content is never written once it can
-//    be read. The content replaced is kept where it is, unchanged, never
-//    copied, and released once no read begun before the switch can still be
-//    on it. There is no whole-map copy, snapshot, or
-//    freeze anywhere, and no edit ever waits, checks for permission, or
-//    holds.
+// 11. AN EDIT IS MADE ELSEWHERE AND SWITCHED IN ONLY ONCE THE LIVE MAP HAS
+//    NO READER.
+//    The live map's bytes never change under a reader. From the moment an
+//    edit begins, arrivals are shown a static image of the map as it stood;
+//    the edit is built elsewhere and switched into the live map when its
+//    last reader leaves. Nothing waits for that: the last leave is the
+//    switch. The image is a working copy for its readers alone, never kept
+//    in step, and released when its last reader leaves.
 //
-// 12. A READ OF THE MAP IS NEVER GRANTED, COUNTED, OR NOTICED HERE.
-//    A reader reads the map on the screen, on every access. It never calls,
-//    asks, or tells this file anything to do so. A read of a pool's bytes is granted here: Arrive and
-//    Leave are the only way into a pool, and that read is exactly the span
-//    between them. A read cannot be taken anywhere, passed on, or kept
-//    beyond its reader.
+// 12. EVERY READ OF THE SCREEN PASSES THE BARRIER, AND IS ALWAYS PERMITTED.
+//    The barrier is how this file knows who is reading which version, and
+//    what it chooses to show each arrival. It never refuses a reader of the
+//    screen. A read of a pool's bytes is granted at the pool's own barrier:
+//    Arrive and Leave are the only way into a pool, and that read is
+//    exactly the span between them. A read cannot be taken anywhere, passed
+//    on, or kept beyond its reader.
 //
 // 13. DESTROY ALONE ENDS A POOL, AND ONLY ONCE ITS LAST READER HAS LEFT.
 //    Destroy flags the pool for destruction and refuses every new arrival
@@ -150,30 +149,45 @@
 //   caller is minting.
 //
 // BOOT
-//   One act: the claim of one continuous block of 80 GiB from the RAM
-//   Manager. The map is an element of that block. Whether the claim stands
-//   is posted to Wellness.
+//   The claim of one continuous block of 80 GiB from the RAM Manager, and
+//   the claim of the screen's bytes on LiveRegistry. The map is an element
+//   of that block. Whether the block stands is posted to Wellness.
+//
+// RAM
+//   The RAM held is the boot block and every stretch received since. Free
+//   is what is held less what pools are using. Pool Maintenance asks the
+//   RAM Manager for more when, at its current rate of growth, its free space
+//   would run out before an exchange could complete; it asks for what that
+//   rate consumes over one exchange. The RAM Manager asks for RAM back by
+//   the same rule on its side; Pool Maintenance chooses which bytes go and
+//   never gives up bytes in use. Every exchange is posted to Wellness by
+//   both sides, and the exchange still happens. Continuity is required of
+//   the boot block alone.
 //
 // THE MAP AND ITS READS
 //   The map is held here, and appears on the screen, on LiveRegistry: the
-//   same memory, not a copy. Every read of the map is on the screen. No
+//   live map as the same memory, not a copy. Every read of the map is on the screen. No
 //   other path to the map exists. The map cannot be taken anywhere, only
 //   read.
 //
-//   READ, every access, per unit: the content is read where it appears on
-//   the screen. Nothing is asked of this file, told to it, or counted by it.
+//   READ. Every arrival at the screen passes its barrier, is always
+//   permitted, and is shown either the live map or a static image of it.
+//   It is a reader of that version until it leaves.
 //
 //   NO POOLS, NO MAP. The map is the pools. With no pool standing the screen
 //   shows nothing, and that is correct: it is not a failure, not an empty
 //   state to repair, and nothing is placed there to fill it.
 //
-//   EDIT, per unit touched, one edit at a time:
-//     BUILD. The complete new content is written into memory of its own. The
-//     live content and the screen are not touched.
-//     SWITCH. The screen is switched to show the new content, in one step.
-//     A reader sees the old content or the new, whole, never part of either.
-//     RETIRE. The content replaced is kept where it is, unchanged, and
-//     released once no read begun before the switch can still be on it.
+//   EDIT:
+//     IMAGE. When an edit begins and no image is showing, a static image of
+//     the map is taken and shown to every new arrival. Readers already on
+//     the live map carry on reading it.
+//     BUILD. The edit is made elsewhere. The live map is not touched.
+//     SWITCH. When the live map's last reader leaves, or at once if it has
+//     none, every edit built is switched into the live map and the screen
+//     shows the live map again.
+//     RELEASE. An image's readers keep it until they leave; it is released
+//     when its last reader leaves.
 //
 //   THE KEY. Before its first visit of the session, a reader asks this
 //   file for the map key and keeps it. It reads the screen only through the
@@ -189,8 +203,8 @@
 //   answered, never read again here. Wellness sees them because they exist.
 //
 // OS_OWES
-//   The marker word (live_registry.h). The OS supplies the chunks and
-//   releases retired content; each is declared where it is called.
+//   The marker word (live_registry.h). The OS supplies the chunks; each is
+//   declared where it is called.
 
 #pragma once
 
@@ -249,17 +263,40 @@ struct Gate {
     bool                         closed = false;
 };
 
-// One unit: one pool position, fixed size. `live` is its
-// content, the content the screen shows for it. Null: no pool.
+// One unit: one pool position. Its record is `records[i]` on the live map;
+// `present` false: no pool. `staged`: an edit built for it in `next[i]`,
+// `staged_present` whether a pool stands once it is switched in.
 struct MapUnit {
-    const Pool* live = nullptr;
-    Gate        gate;
+    Gate gate;
+    bool present = false, staged = false, staged_present = false;
 };
 
-// Held by Pool Maintenance alone.
+// Held by Pool Maintenance alone. `records` is the live map; `next` is
+// where edits are built.
 struct PoolMap {
+    Pool*         records    = nullptr;
+    Pool*         next       = nullptr;
     MapUnit*      units      = nullptr;
     std::uint64_t unit_count = 0;
+};
+
+// A static image of the map, for the readers shown it.
+struct ScreenImage {
+    Pool*         records = nullptr;
+    std::uint64_t readers = 0;
+};
+
+// One read of the screen. `bytes` is what this reader was shown; `image`
+// null: the live map.
+struct ScreenRead {
+    const void*  bytes = nullptr;
+    ScreenImage* image = nullptr;
+};
+
+// A stretch of RAM, held or handed back.
+struct Stretch {
+    std::uint8_t* at    = nullptr;
+    std::uint64_t bytes = 0;
 };
 
 // A granted read of a pool's bytes. Not copyable to anyone else's use; it is
@@ -315,10 +352,22 @@ public:
     MapKey   map_key() const;
 
     // ---- boot ----------------------------------------------------------------
-    // The one boot act: one continuous block of 80 GiB claimed from the RAM
-    // Manager. Nothing is returned; whether the block stands is posted to
-    // Wellness.
+    // One continuous block of 80 GiB claimed from the RAM Manager, and the
+    // screen's bytes claimed on LiveRegistry. Nothing is returned; whether
+    // the block stands is posted to Wellness.
     void boot();
+
+    // ---- the screen ----------------------------------------------------------
+    // Always permitted. The reader is shown the live map, or the static image
+    // while an edit is pending, and reads only what it was shown until it
+    // leaves.
+    ScreenRead arrive_screen();
+    void       leave_screen(const ScreenRead& read);
+
+    // ---- RAM back to the RAM Manager -----------------------------------------
+    // The RAM Manager asking for `bytes`. Pool Maintenance chooses which
+    // bytes go, never bytes in use, and hands them over.
+    std::vector<Stretch> give_back(std::uint64_t bytes);
 
     PoolRead arrive(MapUnit* unit);
     void     leave(const PoolRead& read, bool died = false);
@@ -382,28 +431,50 @@ private:
     // One chunk from the OS onto the end of the pool. Caller holds the lock.
     bool take_chunk_locked(Pool& p);
 
-    // The one edit, per unit: the new content built apart,
-    // the screen switched to show it, the content replaced retired. Caller
-    // holds the lock.
+    // The one edit, per unit: built in `next`, an image shown to arrivals
+    // if none is, switched in once the live map has no reader. Caller holds
+    // the lock.
     void write_unit_locked(PoolMap& map, MapUnit& u, Pool next, bool present);
+
+    // Every built edit into the live map; the screen back on it; images
+    // with no reader released. Caller holds both locks.
+    void switch_in_locked(PoolMap& map);
+
+    // A unit's pool as this file has it: the built edit if there is one,
+    // else the live record. Null: no pool.
+    static const Pool* view(const PoolMap& map, const MapUnit& u);
 
     // The unit holding this pool, live and not flagged for
     // destruction; null if none. Used by create, grow, reclassify.
     static MapUnit* live_unit(PoolMap& map, const std::string& pool_id);
 
+    // More RAM from the RAM Manager: `bytes`, the exchange timed. Caller
+    // holds the lock.
+    void ask_locked(std::uint64_t bytes);
+
     // The pool leaves the map; its chunks go back. Its gate
     // is closed and empty. Caller holds the lock. Used by destroy and leave.
     void end_pool_locked(PoolMap& map, MapUnit& u);
 
-    // The block claimed at boot. Wholly this file's. Null: no block.
-    std::uint8_t* block_       = nullptr;
-    std::uint64_t block_bytes_ = 0;
+    // The RAM held: the boot block first, every stretch received after it.
+    // Wholly this file's.
+    std::vector<Stretch> held_;
+    std::uint64_t        held_bytes_ = 0, used_bytes_ = 0;
+    // The last exchange with the RAM Manager, and the last chunk taken.
+    std::uint64_t        exchange_ns_ = 0, last_take_ns_ = 0;
 
     // The map. Held here alone.
     PoolMap map_;
 
-    // This file's callers, one at a time on the map. Not the map's lock —
-    // the map has none; readers never wait on an edit.
+    // The screen's barrier: readers on the live map, the image shown to new
+    // arrivals (null: the live map), every image still read.
+    std::uint64_t             live_readers_ = 0;
+    ScreenImage*              showing_      = nullptr;
+    std::vector<ScreenImage*> images_;
+    std::mutex                screen_mutex_;
+
+    // This file's callers, one at a time on the map. Taken before the
+    // screen's barrier, never after.
     mutable std::mutex mutex_;
 };
 

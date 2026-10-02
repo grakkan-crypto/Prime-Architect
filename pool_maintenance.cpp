@@ -23,17 +23,19 @@ std::uint64_t os_chunk_size();
 std::uint8_t* os_chunk_take();
 void          os_chunk_return(std::uint8_t* chunk);
 
-// The screen: switched to show `content` as that unit, in one step. Null:
-// nothing shown for it.
-void          os_screen_show(std::uint64_t unit, const Pool* content);
-
-// Retired unit content, handed over at the switch. Released once no read
-// begun before the switch can still be on it.
-void          os_retire(const Pool* retired);
-
 // BUILD OUTLINE — TO BE REMOVED ONCE THE RAM MANAGER IS BUILT. The RAM
-// Manager hands over one continuous block of `bytes`, or null when it cannot.
+// Manager hands over one continuous block of `bytes`, or null when it cannot;
+// hands over a stretch of `bytes`, not necessarily continuous with anything
+// held, or null when it cannot, and posts the exchange to Wellness; and calls
+// give_back when, at its own current rate of growth, its free space would run
+// out before an exchange could complete.
 std::uint8_t* ram_manager_claim_continuous(std::uint64_t bytes);
+std::uint8_t* ram_manager_supply(std::uint64_t bytes);
+
+static std::uint64_t now_ns() {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
 
 // ---------------------------------------------------------------------------
 // Boot
@@ -41,10 +43,69 @@ std::uint8_t* ram_manager_claim_continuous(std::uint64_t bytes);
 void PoolMaintenance::boot() {
     constexpr std::uint64_t kBootClaim = 80ull << 30;
     std::lock_guard<std::mutex> lock(mutex_);
-    block_       = ram_manager_claim_continuous(kBootClaim);
-    block_bytes_ = block_ != nullptr ? kBootClaim : 0;
-    const bool wellness_check_pool_memory_claimed = block_ != nullptr;
+    const std::uint64_t t0 = now_ns();
+    std::uint8_t* const b  = ram_manager_claim_continuous(kBootClaim);
+    exchange_ns_ = now_ns() - t0;
+    const bool wellness_check_pool_memory_claimed = b != nullptr;
     (void)wellness_check_pool_memory_claimed;
+    if (b != nullptr) { held_.push_back({ b, kBootClaim }); held_bytes_ = kBootClaim; }
+    live_registry().screen = map_.records;   // the screen's bytes, claimed
+}
+
+// ---------------------------------------------------------------------------
+// RAM — asked for, handed back
+// ---------------------------------------------------------------------------
+void PoolMaintenance::ask_locked(std::uint64_t bytes) {
+    const bool wellness_check_pool_memory_low = true;
+    (void)wellness_check_pool_memory_low;
+    const std::uint64_t t0 = now_ns();
+    std::uint8_t* const s  = ram_manager_supply(bytes);
+    exchange_ns_ = now_ns() - t0;
+    const bool wellness_check_pool_memory_supplied = s != nullptr;
+    (void)wellness_check_pool_memory_supplied;
+    if (s != nullptr) { held_.push_back({ s, bytes }); held_bytes_ += bytes; }
+}
+
+std::vector<Stretch> PoolMaintenance::give_back(std::uint64_t bytes) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const bool wellness_check_pool_memory_given = true;
+    (void)wellness_check_pool_memory_given;
+    std::uint64_t n = std::min(bytes, held_bytes_ > used_bytes_ ? held_bytes_ - used_bytes_ : 0);
+    std::vector<Stretch> out;
+    while (n != 0 && !held_.empty()) {
+        Stretch& s = held_.back();
+        const std::uint64_t k = std::min(n, s.bytes);
+        s.bytes -= k;
+        out.push_back({ s.at + s.bytes, k });
+        held_bytes_ -= k;
+        n           -= k;
+        if (s.bytes == 0) held_.pop_back();
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// The screen — always permitted, every reader known
+// ---------------------------------------------------------------------------
+ScreenRead PoolMaintenance::arrive_screen() {
+    std::lock_guard<std::mutex> lock(screen_mutex_);
+    if (showing_ != nullptr) { ++showing_->readers; return { showing_->records, showing_ }; }
+    ++live_readers_;
+    return { map_.records, nullptr };
+}
+
+void PoolMaintenance::leave_screen(const ScreenRead& read) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> screen(screen_mutex_);
+    if (read.image != nullptr) {
+        if (--read.image->readers == 0 && read.image != showing_) {
+            images_.erase(std::find(images_.begin(), images_.end(), read.image));
+            delete[] read.image->records;
+            delete read.image;
+        }
+        return;
+    }
+    if (--live_readers_ == 0 && showing_ != nullptr) switch_in_locked(map_);
 }
 
 // ---------------------------------------------------------------------------
@@ -80,16 +141,48 @@ void PoolMaintenance::leave(const PoolRead& read, bool died) {
 // The one edit, per unit — built apart, then switched
 // ---------------------------------------------------------------------------
 void PoolMaintenance::write_unit_locked(PoolMap& map, MapUnit& u, Pool next, bool present) {
-    const Pool* built = present ? new Pool(std::move(next)) : nullptr;   // built complete, apart
-    const Pool* old   = u.live;
-    os_screen_show(static_cast<std::uint64_t>(&u - map.units), built);  // OS_OWES — the switch
-    u.live = built;
-    if (old != nullptr) os_retire(old);                                 // OS_OWES
+    const std::uint64_t i = static_cast<std::uint64_t>(&u - map.units);
+    map.next[i]      = std::move(next);                         // built elsewhere
+    u.staged         = true;
+    u.staged_present = present;
+    std::lock_guard<std::mutex> screen(screen_mutex_);
+    if (showing_ == nullptr) {                                   // the image, for new arrivals
+        ScreenImage* img = new ScreenImage{ new Pool[map.unit_count], 0 };
+        std::copy(map.records, map.records + map.unit_count, img->records);
+        images_.push_back(img);
+        showing_ = img;
+        live_registry().screen = img->records;
+    }
+    if (live_readers_ == 0) switch_in_locked(map);
+}
+
+void PoolMaintenance::switch_in_locked(PoolMap& map) {
+    for (std::uint64_t i = 0; i < map.unit_count; ++i) {
+        MapUnit& u = map.units[i];
+        if (!u.staged) continue;
+        map.records[i] = std::move(map.next[i]);
+        u.present      = u.staged_present;
+        u.staged       = false;
+    }
+    showing_ = nullptr;
+    live_registry().screen = map.records;
+    for (auto it = images_.begin(); it != images_.end();) {
+        if ((*it)->readers != 0) { ++it; continue; }
+        delete[] (*it)->records;
+        delete *it;
+        it = images_.erase(it);
+    }
+}
+
+const Pool* PoolMaintenance::view(const PoolMap& map, const MapUnit& u) {
+    const std::uint64_t i = static_cast<std::uint64_t>(&u - map.units);
+    if (u.staged) return u.staged_present ? &map.next[i] : nullptr;
+    return u.present ? &map.records[i] : nullptr;
 }
 
 MapUnit* PoolMaintenance::live_unit(PoolMap& map, const std::string& pool_id) {
     for (std::uint64_t i = 0; i < map.unit_count; ++i) {
-        const Pool* p = map.units[i].live;
+        const Pool* p = view(map, map.units[i]);
         if (p != nullptr && !p->flagged_for_destruction && p->pool_id == pool_id)
             return &map.units[i];
     }
@@ -97,11 +190,13 @@ MapUnit* PoolMaintenance::live_unit(PoolMap& map, const std::string& pool_id) {
 }
 
 void PoolMaintenance::end_pool_locked(PoolMap& map, MapUnit& u) {
-    const Pool* p = u.live;
+    const Pool* p = view(map, u);
     if (p == nullptr || !p->flagged_for_destruction) return;
     const std::vector<std::uint8_t*> chunks = p->chunks;
     write_unit_locked(map, u, Pool{}, false);                   // the edit: the entry gone
     for (std::uint8_t* c : chunks) os_chunk_return(c);          // OS_OWES
+    const std::uint64_t freed = chunks.size() * os_chunk_size();   // OS_OWES
+    used_bytes_ = used_bytes_ > freed ? used_bytes_ - freed : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,14 +258,14 @@ void PoolMaintenance::create(const ClassRef&    cls,
         if (!continues_from.empty()) {
             MapUnit* from = live_unit(map, continues_from);
             if (from == nullptr) chain_ok = false;
-            else p.prompt_ids = from->live->prompt_ids;
+            else p.prompt_ids = view(map, *from)->prompt_ids;
         }
 
         // A free unit: no pool on it.
         MapUnit* free_unit = nullptr;
         if (chain_ok)
             for (std::uint64_t i = 0; i < map.unit_count && free_unit == nullptr; ++i)
-                if (map.units[i].live == nullptr)
+                if (view(map, map.units[i]) == nullptr)
                     free_unit = &map.units[i];
         // No free unit: posted at the instant it is known.
         const bool wellness_check_pool_map_full = chain_ok && free_unit == nullptr;
@@ -201,7 +296,7 @@ bool PoolMaintenance::grow(const std::string& pool_id) {
     PoolMap& map = map_;
     MapUnit* u = live_unit(map, pool_id);
     if (u == nullptr) return false;
-    Pool next = *u->live;
+    Pool next = *view(map, *u);
     if (!take_chunk_locked(next)) return false;
     write_unit_locked(map, *u, std::move(next), true);   // the edit: one chunk appended
     return true;
@@ -216,8 +311,19 @@ bool PoolMaintenance::take_chunk_locked(Pool& p) {
     (void)wellness_check_pool_out_of_memory;
 
     if (c == nullptr) return false;
+    const std::uint64_t cs = os_chunk_size();   // OS_OWES
     p.chunks.push_back(c);
-    p.byte_capacity = p.chunks.size() * os_chunk_size();   // OS_OWES
+    p.byte_capacity = p.chunks.size() * cs;
+    used_bytes_ += cs;
+
+    // The current rate of growth, over one exchange: what it would consume
+    // before more RAM could arrive. Free space below that: ask.
+    const std::uint64_t t  = now_ns();
+    const std::uint64_t dt = t - last_take_ns_;
+    last_take_ns_ = t;
+    const double need = dt != 0 ? static_cast<double>(cs) * static_cast<double>(exchange_ns_) / static_cast<double>(dt) : 0.0;
+    const std::uint64_t free = held_bytes_ > used_bytes_ ? held_bytes_ - used_bytes_ : 0;
+    if (static_cast<double>(free) < need) ask_locked(static_cast<std::uint64_t>(need));
     return true;
 }
 
@@ -246,7 +352,7 @@ std::uint64_t PoolMaintenance::destroy(const PoolFilter& filter, const std::stri
     std::uint64_t n = 0;
     for (std::uint64_t i = 0; i < map.unit_count; ++i) {
         MapUnit& u = map.units[i];
-        const Pool* live = u.live;
+        const Pool* live = view(map, u);
         if (live == nullptr || live->flagged_for_destruction) continue;
         const Pool& p = *live;
         const bool immune =
@@ -274,7 +380,7 @@ std::uint64_t PoolMaintenance::flag(const PoolFilter& filter, const std::string&
     std::uint64_t n = 0;
     for (std::uint64_t i = 0; i < map.unit_count; ++i) {
         MapUnit& u = map.units[i];
-        const Pool* live = u.live;
+        const Pool* live = view(map, u);
         if (live == nullptr || live->flagged_for_destruction) continue;
         if (!matches(*live, filter)) continue;
         ++n;
@@ -293,7 +399,7 @@ std::uint64_t PoolMaintenance::unflag(const PoolFilter& filter, const std::strin
     std::uint64_t n = 0;
     for (std::uint64_t i = 0; i < map.unit_count; ++i) {
         MapUnit& u = map.units[i];
-        const Pool* live = u.live;
+        const Pool* live = view(map, u);
         if (live == nullptr || live->flagged_for_destruction) continue;
         if (!matches(*live, filter)) continue;
         ++n;
@@ -318,7 +424,7 @@ PoolMaintenance::reclassify(const std::string& pool_id, const ClassRef& cls) {
     PoolMap& map = map_;
     MapUnit* u = live_unit(map, pool_id);
     if (u == nullptr) return Reclassify::NotFound;
-    Pool next = *u->live;
+    Pool next = *view(map, *u);
     next.class_id = class_id;
     write_unit_locked(map, *u, std::move(next), true);   // the edit
     return Reclassify::Done;
