@@ -1,6 +1,32 @@
-// pool_maintenance.h — THE POOL'S MAINTAINER. One file: a pool comes into
-// existence here and goes out of existence here. Nowhere else. It lives on
-// the pool map, which this file holds.
+// pool_maintenance.h — POOL MAINTENANCE. AN OS LAYER OF THE ONE SYSTEM.
+//
+// FUNCTION
+//   Owns the pool memory: the RAM it claims from the RAM Manager at boot, at
+//   least 80 GB, held for pools and for every model's KV cache, the
+//   tokenised form of a pool's contents. It is the only place a pool comes
+//   into existence and goes out of existence. It lives on the pool map,
+//   which this file holds.
+//
+// STANDING
+//   An OS layer holds defined authorities within one system working in
+//   unison. It is not independent of that system and it takes instruction
+//   from it. RAM held here belongs wholly to this file; what happens to
+//   those bytes is its concern alone.
+//
+// AUTHORITIES
+//   - Pool-level access over every pool and every model's KV cache.
+//   - Who holds the pool map screen on LiveRegistry.
+//   - Which bytes go back when RAM is reclaimed.
+//   - When a destruction it is instructed to carry out is safe, and carrying
+//     it out then.
+//
+// NOT HELD
+//   Whether a pool exists or is destroyed. That arrives as an instruction
+//   from the rest of the system.
+//
+// THE RAM MANAGER
+//   Co-dependent. The RAM Manager supplies the RAM; this file decides how it
+//   is used and what is returned. Neither sits above the other.
 //
 // ===========================================================================
 // OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
