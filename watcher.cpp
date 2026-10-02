@@ -1,25 +1,14 @@
-// watcher.cpp — Watcher implementation
-//
-// The doors queue and start the loop. The loop drains the queue, reads,
-// evaluates, delivers, replaces its previous copies, and goes again until
-// there is nothing to do.
-
 #include "watcher.h"
 
-#include "live_registry.h"      // the screen — where the map is read
-#include "pool_maintenance.h"   // [[COW-EDIT 35]] the map key
-#include "text_file.h"          // read_text_file — the plain disk read
+#include "live_registry.h"
+#include "pool_maintenance.h"   // [[COW-EDIT 35]]
+#include "text_file.h"
 
 #include <algorithm>
 #include <cstdlib>
 #include <thread>
 #include <utility>
 
-// ---------------------------------------------------------------------------
-// THE READS WATCHER MAKES: a pool's content off VRAM; a region of
-// unified memory; a flag a file keeps. A flag or a region that is not there
-// is nullopt. The stop token's text.
-// ---------------------------------------------------------------------------
 namespace prime {
 
 std::string                pool_content(const PoolRecord& pool);
@@ -27,7 +16,7 @@ std::optional<std::string> unified_memory(std::uint64_t address, std::uint64_t l
 std::optional<std::string> flag_value(const std::string& name);
 std::string                stop_token();
 
-} // namespace prime
+}
 
 namespace prime {
 
@@ -67,18 +56,12 @@ Snapshot single(std::optional<std::string> v) {
     return s;
 }
 
-// One thing sought in pool content: the test and the value it looks for.
 using Sought = std::pair<Test, std::string>;
 
 std::string memory_key(const Entry& e) {
     return std::to_string(e.address) + ":" + std::to_string(e.length);
 }
 
-// The items worth testing against a selector, on one read. Pool IDs named as
-// an inclusion are the keys: looked up directly, nothing walked. Otherwise
-// the first named attribute's view is taken — every item filed under any of
-// its values. Otherwise everything. A candidate still has to match the
-// selector whole; this only decides what gets asked.
 std::set<std::string> candidates(const Selector& s, const Snapshot& snap, const PoolView* view) {
     std::set<std::string> out;
     if (!s.pool_id.values.empty() && !s.pool_id.exclude) {
@@ -101,10 +84,6 @@ std::set<std::string> candidates(const Selector& s, const Snapshot& snap, const 
     return out;
 }
 
-// The items in the entry's tested state on the read given as `now`. Tests
-// that are a comparison of two reads take the previous read as `old`; with
-// no previous read they produce nothing. NOT on a population becomes one
-// state of the source, keyed empty.
 std::vector<std::string> in_state(const Entry& e,
                                   const Snapshot& now, const PoolView* now_view,
                                   const Snapshot* old, const PoolView* old_view) {
@@ -161,9 +140,6 @@ std::vector<std::string> in_state(const Entry& e,
     return ids;
 }
 
-// A shared content result taken by one entry: the pools found, kept where
-// the record each pool carries — on `look`, or on `also` for a pool no longer
-// there — matches the entry's selector. NOT then applied as in in_state.
 std::vector<std::string> narrowed(const Entry& e, const std::vector<std::string>& found,
                                   const Snapshot& look, const Snapshot* also) {
     std::vector<std::string> ids;
@@ -176,14 +152,7 @@ std::vector<std::string> narrowed(const Entry& e, const std::vector<std::string>
     return ids;
 }
 
-} // namespace
-
-// ===========================================================================
-// THE DOORS — queue, and start the loop if it is not running.
-// A deregistration or a scope teardown arriving with nothing live starts a
-// loop that finds nothing to do and stops: one path for every door, no
-// door privileged to look first.
-// ===========================================================================
+}
 
 void Watcher::open(Door door) {
     bool start = false;
@@ -234,11 +203,6 @@ void Watcher::Watcher_Wake() {
 std::vector<Request>& Watcher::Watcher_Retained() {
     return retained_;
 }
-
-// ===========================================================================
-// THE READING LIST — by count, per level. At zero the source
-// and every copy of it are gone. The forbidden list is not a copy and stays.
-// ===========================================================================
 
 void Watcher::watch(const Request& r, int delta) {
     const bool background = r.level == ActiveLevel::Background;
@@ -301,8 +265,6 @@ const Snapshot* Watcher::snapshot_of(const Entry& e, bool previous) const {
     }
 }
 
-// The view that belongs to the read snapshot_of gives; nothing for a source
-// that has none.
 const PoolView* Watcher::view_of(const Entry& e, bool previous) const {
     if (snapshot_of(e, previous) == nullptr) return nullptr;
     switch (e.kind) {
@@ -312,13 +274,8 @@ const PoolView* Watcher::view_of(const Entry& e, bool previous) const {
     }
 }
 
-// ===========================================================================
-// THE LOOP. Runs while there is something to do.
-// ===========================================================================
-
 void Watcher::run() {
     for (;;) {
-        // ---- A. INTAKE — the doors, in arrival order.
         std::vector<Door> doors;
         bool asleep = false;
         {
@@ -342,13 +299,12 @@ void Watcher::run() {
                 continue;
             }
 
-            // ---- the convention, whole, or refused whole --------
             Request& r = d.request;
             bool valid = !r.name.empty() &&
                          !r.triggers.empty() &&
                          !r.recipients.empty() &&
                          !r.scopes.empty();
-            bool ends = false;   // some scope the request carries has an end
+            bool ends = false;
             for (const std::string& s : r.scopes) {
                 const bool none   = s == kWatcherScopeNone;
                 const bool listed = std::find(kWatcherScopes.begin(), kWatcherScopes.end(), s) != kWatcherScopes.end();
@@ -396,16 +352,12 @@ void Watcher::run() {
             live_.push_back(std::move(l));
         }
 
-        // ---- nothing to do? The live list is empty. Then this file stops.
-        // Sleep is not nothing to do.
         if (live_.empty()) {
             std::lock_guard<std::mutex> lock(door_mutex_);
             if (doors_.empty()) { running_ = false; return; }
             continue;
         }
 
-        // ---- B. READ — whole, once, the map first. Asleep, only
-        // what background names.
         const bool read_map     = asleep ? pool_map_watch_.background > 0
                                          : pool_map_watch_.foreground + pool_map_watch_.background > 0;
         const bool read_content = asleep ? pool_content_watch_.background > 0
@@ -414,10 +366,8 @@ void Watcher::run() {
         std::vector<PoolRecord> map;
         PoolView                view;
         if (read_map || read_content) {
-            // [[COW-EDIT 31]] Every record is copied off the screen into this
-            // file's own working copy, unit by unit.
-            // [[COW-EDIT 75]] The key first, once per session; then every
-            // record is read off the screen through it.
+            // [[COW-EDIT 31]]
+            // [[COW-EDIT 75]]
             if (!has_map_key_) {
                 map_key_     = pool_maintenance().map_key();
                 has_map_key_ = true;
@@ -444,7 +394,6 @@ void Watcher::run() {
                 if (present) ++it;
                 else { it = forbidden_.erase(it); forbidden_changed = true; }
             }
-            // The read's own view of itself, from the records, once.
             for (const PoolRecord& p : map) {
                 view.by_class[p.class_id].push_back(p.id);
                 view.by_turn[p.turn_id].push_back(p.id);
@@ -463,8 +412,6 @@ void Watcher::run() {
                 if (forbidden_.count(p.id)) continue;
                 content_now_.emplace(p.id, WatcherItem{ pool_content(p), p });
             }
-            // Content is the map less the forbidden; so is its view. Nothing
-            // is classified a second time.
             content_view_now_ = PoolView{};
             const auto less_forbidden = [this](const auto& from, auto& to) {
                 for (const auto& [key, ids] : from)
@@ -491,10 +438,6 @@ void Watcher::run() {
                 memory_now_[key] = single(unified_memory(address, length));
             }
 
-        // ---- SHARED CONTENT SEARCHES. Every distinct thing sought in pool
-        // content by a request evaluated this pass, the stop token always
-        // among them, is searched for once across every non-forbidden pool's
-        // copy. Every request that asked for it takes that one result.
         std::map<Sought, std::vector<std::string>> found_now;
         std::map<Sought, std::vector<std::string>> found_before;
         std::string token;
@@ -523,21 +466,17 @@ void Watcher::run() {
             }
         }
 
-        // ---- C–F. EVALUATE, ATTEMPT, DELIVER.
         std::vector<std::size_t> fired_out;
         for (std::size_t i = 0; i < live_.size(); ++i) {
             Live&          l = live_[i];
             const Request& r = l.request;
             if (asleep && r.level == ActiveLevel::Foreground) continue;
 
-            // Two reads or nothing: with no previous copy of a trigger's
-            // source the comparison cannot be made, and is not.
             bool comparable = true;
             for (const Entry& e : r.triggers)
                 if (snapshot_of(e, false) == nullptr || snapshot_of(e, true) == nullptr) comparable = false;
             if (!comparable) continue;
 
-            // ---- what is eligible on each trigger ---------------
             for (std::size_t k = 0; k < r.triggers.size(); ++k) {
                 const Entry&    e        = r.triggers[k];
                 const Snapshot& now      = *snapshot_of(e, false);
@@ -575,8 +514,6 @@ void Watcher::run() {
                 l.spent[k]   = std::move(spent);
             }
 
-            // ---- complete matches. What is used leaves the eligible list
-            // now; the record of it is written last. -------------
             std::vector<std::vector<std::string>> used(r.triggers.size());
             std::uint64_t complete = 0;
             if (r.combine == Combine::And) {
@@ -595,7 +532,6 @@ void Watcher::run() {
             }
             if (complete == 0) continue;
 
-            // ---- the checks, at this moment only ----------------
             bool passes = true;
             for (const Entry& c : r.checks) {
                 const Snapshot* now = snapshot_of(c, false);
@@ -606,7 +542,6 @@ void Watcher::run() {
                 if (ids.empty()) passes = false;
             }
 
-            // ---- deliver, count ----------------------------
             bool leaves = false;
             if (passes) {
                 const std::uint64_t firings = r.count == 0 ? complete : std::min(complete, l.remaining);
@@ -622,17 +557,12 @@ void Watcher::run() {
                 }
             }
 
-            // ---- the record of what was used — for a request still here.
             if (!leaves)
                 for (std::size_t k = 0; k < used.size(); ++k)
                     for (const std::string& id : used[k]) l.spent[k].insert(id);
         }
         for (std::size_t n = fired_out.size(); n-- > 0;) remove(fired_out[n]);
 
-        // ---- G. BOOKKEEPING — the forbidden list: additions,
-        // then, if it changed this pass, a complete copy published whole.
-        // Then previous becomes current for everything read this pass; a
-        // pool read's view of itself goes with it.
         if (read_content)
             for (const std::string& id : found_now.at(Sought{ Test::Contains, token }))
                 if (forbidden_.insert(id).second) forbidden_changed = true;
@@ -657,16 +587,12 @@ void Watcher::run() {
     }
 }
 
-// ===========================================================================
-// The one instance
-// ===========================================================================
-
 namespace {
 Watcher the_one;
-} // namespace
+}
 
 Watcher& watcher() {
     return the_one;
 }
 
-} // namespace prime
+}
