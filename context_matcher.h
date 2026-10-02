@@ -39,18 +39,22 @@
 //
 //   Each step gives every pool a lift: its share of the step's Class 1
 //   attention divided by its share of Class 1 tokens. One is background. A
-//   pool not yet linked to the held prompt ID is linked once it has enough
-//   lifts to judge and either its mean lift over the most recent ones is
-//   sustained, or it stood out sharply on several of the most recent steps.
-//   A link writes the prompt ID's whole set of pools to LiveRegistry and,
-//   in the same motion, tells Masking the prompt IDs and the pool IDs just
-//   linked. The evaluation starts afresh with each new held prompt ID.
+//   pool qualifies once it has enough lifts to judge and either the mean of
+//   its most recent ones is sustained, or it stood out sharply on several of
+//   the most recent steps. A qualifying pool is noted against the held
+//   prompt ID. A noted pool that no longer qualifies is taken off once the
+//   mean of all its lifts falls below background. Every noting and every
+//   taking off tells Masking, in the same motion, the prompt IDs and the
+//   pool IDs concerned. The pools noted are held here and not written to
+//   LiveRegistry while the prompt ID is being evaluated. The evaluation
+//   starts afresh with each new held prompt ID.
 //
 //   The map is read only through the map key. The key is asked of Pool
 //   Maintenance once, before this file's first visit to the screen in the
 //   session, and held for the rest of the session. Between deliveries this
-//   file holds the key, the prompt agents, the held prompt ID and the
-//   evaluation's recent lifts per pool, nothing else.
+//   file holds the key, the prompt agents, the held prompt ID, each pool's
+//   lifts in the evaluation and the pools noted against the held prompt ID,
+//   nothing else.
 //
 // ===========================================================================
 // OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
@@ -114,12 +118,18 @@
 //     A link is earned over a run of steps, never on one token, and never
 //     before the generation has run long enough to judge.
 //
-// 13. EVERY LINK IS TOLD TO MASKING IN THE SAME MOTION.
-//     A link written to LiveRegistry without Masking being told, or Masking
-//     told of a link not written, is wrong. What Masking is told is the
-//     prompt IDs linked to and the pool IDs just linked, nothing else.
+// 13. EVERY CHANGE TO A PROMPT ID'S POOLS IS TOLD TO MASKING IN THE SAME
+//     MOTION.
+//     A pool noted or taken off without Masking being told, or Masking told
+//     of a change not made, is wrong. What Masking is told is the prompt IDs
+//     and the pool IDs concerned, nothing else.
 //
-// 14. CONTEXTMATCHER OWNS NO POOL.
+// 14. A PROMPT ID'S POOLS ARE NEVER WRITTEN TO LIVEREGISTRY WHILE IT IS
+//     BEING EVALUATED.
+//     The pools noted are held here until the evaluation of that prompt ID
+//     is over; nothing partial is ever posted.
+//
+// 15. CONTEXTMATCHER OWNS NO POOL.
 //    It does not create, write, migrate, or destroy any pool. It reads and
 //    it links. Pool Maintenance owns the pool; LiveRegistry holds the links.
 //
