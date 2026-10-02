@@ -60,78 +60,61 @@
 // OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
 // definition. It is raised with the user, never made.
 //
-// 1. CONTEXTMATCHER DOES NOT POLL.
-//    It never loops, never checks a pool on a timer, never looks to see
-//    whether something has happened. Watcher watches; this file is told.
+// 1. CONTEXTMATCHER MUST NOT POLL.
+//    It must not loop, time, or check anything to find out whether
+//    something has happened. It must act only on what it is told.
 //
-// 2. THE CLASS IS LOOKED UP, NEVER HELD.
-//    Class IDs belong to LiveRegistry and change with the pipeline. Each is
-//    asked for by name at the moment of registering and handed straight to
-//    Watcher. No class ID is stored here, and none is written in.
+// 2. A CLASS ID MUST NOT BE STORED OR WRITTEN IN.
+//    It must be looked up by name from LiveRegistry at the moment it is
+//    needed.
 //
-// 3. EVERY REQUEST ENDS WITH THE PIPELINE.
-//    A class ID is true only for the pipeline that assigned it, so every
-//    request carries the pipeline scope and dies with it. Registering again
-//    belongs to the next pipeline's load.
+// 3. EVERY WATCHER REQUEST MUST CARRY THE PIPELINE SCOPE.
+//    A request must not outlive the pipeline whose class IDs it was built
+//    from.
 //
-// 4. A REQUEST IS HANDED OVER COMPLETE.
-//    Every part Watcher takes is stated here, including what matches its
-//    default. Nothing is left for Watcher to assume.
+// 4. EVERY WATCHER REQUEST MUST BE HANDED OVER WITH EVERY PART STATED.
+//    No part may be left to a default.
 //
-// 5. A MISSING INPUT POOL IS A FACT FOR WELLNESS, NOT A STOP.
-//    If the registry does not know a name, Wellness is told and no request
-//    is made for that name. Every other name goes ahead. Nothing stands in
-//    for the missing class, and nothing is retried.
+// 5. AN INPUT POOL NAME LIVEREGISTRY DOES NOT KNOW MUST BE FLAGGED TO
+//    WELLNESS AND MUST NOT STOP THE OTHERS.
+//    Nothing may stand in for the missing class, and it must not be retried.
 //
-// 6. A DELIVERY IS A PROMPT TO LOOK, NOT AN ANSWER.
-//    Watcher says which input pool, never which pool arrived. The receipt
-//    is mechanical and immediate. Whatever needs the pool itself reads the
-//    map; nothing is asked of Watcher and nothing is sent back.
+// 6. A WATCHER DELIVERY MUST BE ANSWERED AT ONCE.
+//    No work may be done before the receipt goes back. Nothing may be asked
+//    of Watcher or sent back to it beyond the receipt.
 //
-// 7. THE MAP KEY IS ASKED FOR ONCE A SESSION AND HELD.
-//    It is taken from Pool Maintenance before the first visit to the screen
-//    and before no other; every read of the map goes through it. It is never
-//    asked for again in the session, never passed on, never edited here.
-//    The map is never read through its layout.
+// 7. THE MAP KEY MUST BE TAKEN ONCE PER SESSION, BEFORE THE FIRST VISIT TO
+//    THE SCREEN, AND HELD.
+//    It must not be asked for again in the session, passed on, or edited.
+//    The map must be read only through the key, never through its layout.
 //
-// 8. A MAP READ IS ARRIVED, USED AND LEFT, EVERY TIME.
-//    Each delivery arrives on the screen, copies out what it needs, and
-//    leaves before anything else is done with it. A read is never kept,
-//    never carried to the next delivery, never handed to anyone. What was
-//    copied out is a working copy for that one delivery, gone with it.
+// 8. EVERY MAP READ MUST BE LEFT BEFORE WHAT IT GAVE IS USED.
+//    A read must not be kept, carried to another delivery, or handed on.
 //
-// 9. THE NEWEST POOL IS THE ONE WITH THE GREATEST POOL ID.
-//    Pool IDs of a kind only ever increase. An input pool carries exactly
-//    one prompt ID.
+// 9. THE NEWEST POOL MUST BE CHOSEN BY THE GREATEST POOL ID.
+//    It must not be chosen by time or by prompt ID.
 //
-// 10. A PROMPT AGENT IS AN AGENT WITH WRITE ACCESS ON AN INPUT POOL.
-//     It is read from the pipeline's permission table and never named here.
-//     It is identified by agent name alone, never by model: agents share
-//     models. The list is replaced whole at every registration.
+// 10. A PROMPT AGENT MUST BE FOUND FROM THE PIPELINE'S PERMISSION TABLE.
+//     No agent may be named here. An agent must be identified by agent
+//     name, never by model.
 //
-// 11. ATTENTION IS TAKEN ONLY AS DELIVERED, NEVER FETCHED.
-//     This file never reads attention for itself, never takes raw weights,
-//     and never takes attention to anything outside Class 1. What it is
-//     handed is all it evaluates.
+// 11. ATTENTION MUST BE TAKEN ONLY AS DELIVERED.
+//     This file must not read attention for itself, take raw weights, or
+//     take attention to anything outside Class 1.
 //
-// 12. NO POOL IS LINKED ON A SINGLE READING.
-//     A link is earned over a run of steps, never on one token, and never
-//     before the generation has run long enough to judge.
+// 12. A POOL MUST NOT BE NOTED ON A SINGLE READING.
+//     Noting must be earned over a run of steps.
 //
-// 13. EVERY CHANGE TO A PROMPT ID'S POOLS IS TOLD TO MASKING IN THE SAME
-//     MOTION.
-//     A pool noted or taken off without Masking being told, or Masking told
-//     of a change not made, is wrong. What Masking is told is the prompt IDs
-//     and the pool IDs concerned, nothing else.
+// 13. EVERY CHANGE TO A PROMPT ID'S POOLS MUST BE TOLD TO MASKING IN THE
+//     SAME MOTION.
+//     Masking must be told nothing but the prompt IDs and the pool IDs
+//     concerned.
 //
-// 14. A PROMPT ID'S POOLS ARE NEVER WRITTEN TO LIVEREGISTRY WHILE IT IS
+// 14. A PROMPT ID'S POOLS MUST NOT BE WRITTEN TO LIVEREGISTRY WHILE IT IS
 //     BEING EVALUATED.
-//     The pools noted are held here until the evaluation of that prompt ID
-//     is over; nothing partial is ever posted.
+//     Nothing partial may be posted.
 //
-// 15. CONTEXTMATCHER OWNS NO POOL.
-//    It does not create, write, migrate, or destroy any pool. It reads and
-//    it links. Pool Maintenance owns the pool; LiveRegistry holds the links.
+// 15. CONTEXTMATCHER MUST NOT CREATE, WRITE, MIGRATE OR DESTROY ANY POOL.
 //
 // WELLNESS
 //   Bare booleans, named for what they answer, set at the instant they are
