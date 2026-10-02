@@ -36,131 +36,50 @@
 //
 // ===========================================================================
 // OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
-// definition. It is raised with the user, never made.
+// definition and is never made.
 //
-// 1. WATCHER IS THE ONLY FILE IN THE SYSTEM THAT POLLS.
-//    Nothing else loops, checks its own input on a timer, or announces
-//    itself downstream. Nothing checks Watcher. A second loop anywhere, for
-//    any reason, is wrong by definition. Registering with Watcher does not
-//    make anything part of Watcher.
+// WATCHER IS THE ONLY FILE IN THE SYSTEM THAT POLLS.
 //
-// 2. A FIRING IS AN OCCURRENCE, NEVER A STANDING STATE.
-//    An item becomes eligible only when the previous read against the
-//    current one shows it entering the tested state. A request that arrives
-//    to find something already there is not told about it. Once used, the
-//    item is spent for that request — on the attempt, not on the delivery;
-//    a check that knocks the firing back still spends it — and it is not
-//    eligible again until it has left the state and entered it again. The
-//    record of what was used is written after delivery, and only for a
-//    request still on the list; a request leaving on this pass writes none,
-//    there being nothing left to keep the record for. Spent is the request's
-//    own: the same occurrence is whole and eligible for every other request
-//    that watches for it. Never add a retry, a pending state, a first-look
-//    exception, or a refire on "still true".
+// 1. WATCHER LOOKS FOR THE STOP TOKEN IN EVERY POOL IT READS, AND NOTHING
+//    ELSE READS IT.
 //
-// 3. THE COUNT COUNTS DELIVERIES. ZERO IS ENDLESS.
-//    Not passes, not attempts, not checks. A knocked-back attempt does not
-//    move it. When one pass produces more occurrences than the count has
-//    left, the count's worth are delivered — oldest first — and the request
-//    leaves; the rest are not delivered to anyone. At zero remaining the
-//    request leaves by the same removal as a deregistration.
+// 2. EVERY REQUEST MUST HAVE AN EXPIRY.
 //
-// 4. A CHECK IS NEVER CAUSAL AND NEVER SPENT.
-//    A check may sit true for any number of passes and Watcher does nothing
-//    about it. It is evaluated at exactly one moment: when the request's
-//    triggers have produced a match on this pass. It gates that firing and
-//    is forgotten. Its items are never tracked, never spent, never counted.
-//    Its source is read every pass like any other, so that it has a
-//    previous copy to compare against when the moment comes.
+// 3. A REQUEST ARRIVES COMPLETE.
+//    Nothing in it is derived, inferred, calculated, defaulted or assumed.
 //
-// 5. THE STOP TOKEN IS THE ONE THING WATCHER UNDERSTANDS, AND THE FORBIDDEN
-//    LIST IS THE ONE THING IT DOES WITH IT.
-//    Every other read is compared, like for like, and reported; nothing is
-//    interpreted. A pool whose stop token Watcher has read goes on the
-//    forbidden list and is never read again, not once, not to check.
-//    Nothing in it changes again; whatever needs its content afterwards has
-//    its own way to it and that is no concern of this file. It leaves the
-//    list only when its ID has left the map, and an ID leaves the map by one
-//    route: destruction. Between those it is eligible for destruction, and
-//    every destruction follows Watcher having read that token; word cannot
-//    go out before the read that produced it has completed. Nothing else in
-//    the system reads the stop token. Never add a second reader.
-//    THE LIST IS THE ONE DEFINITIVE STATEMENT OF WHAT IS FORBIDDEN. It is
-//    written here alone, and what is readable is never the list being
-//    edited: at the end of every pass on which the list changed, a complete
-//    copy is published whole, and a published copy is never touched again.
-//    A reader reads the copy, directly — no call into this file, no broker —
-//    and holds a finished list, last pass's or this pass's, never one
-//    mid-edit, for as long as it likes.
+// 4. WATCHER READS FOR ITSELF.
+//    It asks nothing of anyone but the map key, once a session.
 //
-// 6. THE LIVE LIST HAS ONE EDITOR.
-//    Adding and removing are both editing, and nothing outside this file
-//    does either. The doors — Watcher_Register, Watcher_Deregister,
-//    Watcher_ScopeTeardown, Watcher_Wake — queue. The pass drains the queue
-//    in arrival order before it reads. A request arriving mid-pass joins the
-//    next pass.
+// 5. NOTHING IS READ OR KEPT THAT NO REQUEST NAMES.
 //
-// 7. EVERY REQUEST HAS A WAY OUT.
-//    It fires itself out, it is deregistered by name, or a scope it carries
-//    ends and takes everything under it. A request carries one scope or
-//    several and leaves on the first of them to end. Endless with no ending
-//    scope is refused. None alongside an ending scope is accepted and does
-//    nothing — ruled, not overlooked. A scope goes on the list only once the
-//    thing that ends it exists. A scope ending with nothing under it is
-//    nothing, correctly.
+// 6. THE CLOCK IS NEVER A SOURCE, AND THE PASS NEVER WAITS.
+//    No timer, no backoff, no throttle.
 //
-// 8. INSTRUCTIONS ARRIVE COMPLETE. NOTHING IS DERIVED, INFERRED, CALCULATED,
-//    DEFAULTED OR ASSUMED.
-//    Every part of a request is stated by the registrant, including scope
-//    none, which is a stated value and never a blank. Anything not to the
-//    convention is refused whole: one flag, and the request retained exactly
-//    as handed for Wellness. It never touches the live list. The caller
-//    hears nothing. Watcher never corrects, never partially accepts, never
-//    guesses what was meant; Wellness, which can see what Watcher cannot,
-//    works out what was meant and registers the corrected request through
-//    the ordinary door as its own.
+// 7. A DELIVERY IS THE NAME AND THE MESSAGE, NOTHING ELSE.
+//    Watcher never alters a message, never waits on a recipient, and never
+//    lends its access.
 //
-// 9. WATCHER READS FOR ITSELF, WHOLE, ONCE PER PASS.
-//    Watcher goes and looks for itself and asks nothing of anyone. A
-//    requester never supplies a way of reading, and whether the requester
-//    can reach the source itself does not matter.
-//    Every source is read whole, once per pass, and selection happens
-//    afterwards, in evaluation, never at the read.
+// 8. WATCHER NEVER WRITES TO ANYTHING IT READS.
 //
-// 10. A SOURCE IS READ ONLY WHILE SOMETHING NAMES IT, AND FORGOTTEN THE
-//     MOMENT NOTHING DOES.
-//     No copy is kept "in case". The reading list is maintained by count at
-//     the events that can change it — register, deregister, fire-out, scope
-//     end — and never rebuilt. The map is read before any pool's content.
+// 9. WATCHER COMPARES; IT NEVER INTERPRETS.
+//    The stop token is the one exception.
 //
-// 11. THE CLOCK AND THE CALENDAR ARE NEVER SOURCES, AND THE PASS NEVER WAITS.
-//     No timer, no backoff, no throttle between passes. A file with a time
-//     in mind holds its own request until the time comes and hands it over
-//     then. When there is nothing to do — the live list is empty — Watcher
-//     is not running; a door starts it. Sleep is not nothing to do: asleep,
-//     foreground requests are not evaluated and the sources only they name
-//     are not read; background continues untouched; on waking, foreground
-//     resumes as it was, because nothing in the foreground happened while
-//     the system slept.
+// 10. WATCHER'S ONLY OUTPUTS ARE DELIVERIES AND THE FORBIDDEN LIST.
 //
-// 12. DELIVERY IS THE MESSAGE AND THE NAME. NOTHING ELSE.
-//     Not which item, not which cycle, not why. Handed over, the receipt is
-//     mechanical, and Watcher moves on; it never waits on what a recipient
-//     does, exactly as no file waits on Watcher. A recipient that needs to
-//     know which goes and reads the map itself. Watcher never resolves a
-//     name into a destination, never composes or alters a message, never
-//     lends its access to anyone. Being told a thing happened is not
-//     permission to act on it.
+// 11. THE FORBIDDEN LIST IS WRITTEN BY WATCHER ALONE.
+//
+// 12. WATCHER REPORTS CHANGE, NEVER A STANDING STATE.
 //
 // ===========================================================================
-// THE REQUEST — supplied whole by the registrant (Ruling 8).
+// THE REQUEST — supplied whole by the registrant.
 //
 //   NAME          Chosen by the registrant, meaningful to the recipient, the
 //                 handle for deregistration, delivered with every firing.
 //                 Must not match a name currently live. A removed name is
 //                 free.
 //   TRIGGERS      One or more entries. These make occurrences.
-//   CHECKS        Zero or more entries. These gate (Ruling 4).
+//   CHECKS        Zero or more entries. These gate.
 //   COMBINE       How the triggers combine: And, Or. NOT is per entry.
 //   RECIPIENTS    One or more, each the means of reaching it, used as given.
 //   MESSAGE       Delivered verbatim.
@@ -168,7 +87,7 @@
 //   SCOPES        One or more, each one of kWatcherScopes or
 //                 kWatcherScopeNone. Stated. The request leaves on the first
 //                 to end; none ends nothing.
-//   ACTIVE LEVEL  Foreground or background (Ruling 11).
+//   ACTIVE LEVEL  Foreground or background.
 //
 // THE ENTRY
 //   Which source, and which of it: a pool source names its pools by pool ID,
@@ -321,7 +240,7 @@ struct PoolView {
 // ---- the mechanism ----------------------------------------------------------
 class Watcher {
     // Declared first so the view below is bound to it: the published copy of
-    // the forbidden list. Replaced whole, never edited (Ruling 5). Starts as
+    // the forbidden list. Replaced whole, never edited. Starts as
     // an empty list, never as nothing.
     std::atomic<std::shared_ptr<const std::set<std::string>>> forbidden_published_{
         std::make_shared<const std::set<std::string>>() };
@@ -337,7 +256,7 @@ public:
     void Watcher_Deregister(const std::string& name);
     void Watcher_ScopeTeardown(const std::string& scope);
 
-    // Sleep and wake (Ruling 11).
+    // Sleep and wake.
     void Watcher_Sleep();
     void Watcher_Wake();
 
@@ -345,7 +264,7 @@ public:
     // appends; Wellness clears.
     std::vector<Request>& Watcher_Retained();
 
-    // THE FORBIDDEN LIST, read directly (Ruling 5). The one definitive
+    // THE FORBIDDEN LIST, read directly. The one definitive
     // statement of what is forbidden. What is read here is always a finished
     // list — the last one this file published, whole — and a reader that has
     // taken one holds it unchanged for as long as it likes. Nothing writes
@@ -387,7 +306,7 @@ private:
     std::vector<Live>    live_;
     std::vector<Request> retained_;
 
-    // the reading list, by count (Ruling 10)
+    // the reading list, by count
     Watched                         pool_map_watch_;
     Watched                         pool_content_watch_;
     std::map<std::string, Watched>  flags_;
@@ -405,7 +324,7 @@ private:
     bool                            has_map_     = false;
     bool                            has_content_ = false;
 
-    // the forbidden list as this file edits it (Ruling 5). Pruned at the
+    // the forbidden list as this file edits it. Pruned at the
     // read, added to at bookkeeping, published when it changed.
     std::set<std::string>           forbidden_;
 

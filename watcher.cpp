@@ -7,7 +7,7 @@
 #include "watcher.h"
 
 #include "live_registry.h"      // the screen — where the map is read
-#include "pool_maintenance.h"   // [[COW-EDIT 35]] the map's layout; arrive and leave
+#include "pool_maintenance.h"   // [[COW-EDIT 35]] the map key
 #include "text_file.h"          // read_text_file — the plain disk read
 
 #include <algorithm>
@@ -16,11 +16,9 @@
 #include <utility>
 
 // ---------------------------------------------------------------------------
-// THE READS WATCHER MAKES (Ruling 9): a pool's content off VRAM; a region of
+// THE READS WATCHER MAKES: a pool's content off VRAM; a region of
 // unified memory; a flag a file keeps. A flag or a region that is not there
-// is nullopt. The stop token's text. The map is not declared here: it is
-// read on the screen on LiveRegistry, in the loop, through an arrival Pool
-// Maintenance grants. [[COW-EDIT 36]]
+// is nullopt. The stop token's text.
 // ---------------------------------------------------------------------------
 namespace prime {
 
@@ -181,7 +179,7 @@ std::vector<std::string> narrowed(const Entry& e, const std::vector<std::string>
 } // namespace
 
 // ===========================================================================
-// THE DOORS — queue, and start the loop if it is not running (Ruling 6).
+// THE DOORS — queue, and start the loop if it is not running.
 // A deregistration or a scope teardown arriving with nothing live starts a
 // loop that finds nothing to do and stops: one path for every door, no
 // door privileged to look first.
@@ -238,7 +236,7 @@ std::vector<Request>& Watcher::Watcher_Retained() {
 }
 
 // ===========================================================================
-// THE READING LIST — by count, per level (Rulings 10, 11). At zero the source
+// THE READING LIST — by count, per level. At zero the source
 // and every copy of it are gone. The forbidden list is not a copy and stays.
 // ===========================================================================
 
@@ -320,7 +318,7 @@ const PoolView* Watcher::view_of(const Entry& e, bool previous) const {
 
 void Watcher::run() {
     for (;;) {
-        // ---- A. INTAKE — the doors, in arrival order (Ruling 6).
+        // ---- A. INTAKE — the doors, in arrival order.
         std::vector<Door> doors;
         bool asleep = false;
         {
@@ -344,7 +342,7 @@ void Watcher::run() {
                 continue;
             }
 
-            // ---- the convention, whole, or refused whole (Ruling 8) --------
+            // ---- the convention, whole, or refused whole --------
             Request& r = d.request;
             bool valid = !r.name.empty() &&
                          !r.triggers.empty() &&
@@ -398,15 +396,15 @@ void Watcher::run() {
             live_.push_back(std::move(l));
         }
 
-        // ---- nothing to do? The live list is empty. Then this file stops
-        // (Ruling 11). Sleep is not nothing to do.
+        // ---- nothing to do? The live list is empty. Then this file stops.
+        // Sleep is not nothing to do.
         if (live_.empty()) {
             std::lock_guard<std::mutex> lock(door_mutex_);
             if (doors_.empty()) { running_ = false; return; }
             continue;
         }
 
-        // ---- B. READ — whole, once, the map first (Ruling 9). Asleep, only
+        // ---- B. READ — whole, once, the map first. Asleep, only
         // what background names.
         const bool read_map     = asleep ? pool_map_watch_.background > 0
                                          : pool_map_watch_.foreground + pool_map_watch_.background > 0;
@@ -414,14 +412,10 @@ void Watcher::run() {
                                          : pool_content_watch_.foreground + pool_content_watch_.background > 0;
         bool forbidden_changed = false;
         std::vector<PoolRecord> map;
-        std::vector<MapUnit*>   map_units;   // [[COW-EDIT 32]] the unit each record came from
-        PoolRead                map_read;    // [[COW-EDIT 32]]
         PoolView                view;
         if (read_map || read_content) {
-            // [[COW-EDIT 31]] Arrive on the screen; copy every record this
-            // read sees into this file's own working copy, unit by unit. The
-            // read stays open through the content read below and is left
-            // there.
+            // [[COW-EDIT 31]] Every record is copied off the screen into this
+            // file's own working copy, unit by unit.
             // [[COW-EDIT 75]] The key first, once per session; then every
             // record is read off the screen through it.
             if (!has_map_key_) {
@@ -430,10 +424,9 @@ void Watcher::run() {
             }
             const MapKey& k      = map_key_;
             const void*   screen = live_registry().screen;
-            map_read = pool_maintenance().arrive(nullptr);
             map.reserve(k.unit_count);
             for (std::uint64_t i = 0; i < k.unit_count; ++i) {
-                const std::uint8_t* p = map_record(k, screen, i, map_read.stamp);
+                const std::uint8_t* p = map_record(k, screen, i);
                 if (p == nullptr) continue;
                 PoolRecord r;
                 r.id           = map_field<std::string>(p, k.pool_id);
@@ -444,8 +437,6 @@ void Watcher::run() {
                 r.timestamp_ns = map_field<std::uint64_t>(p, k.timestamp_ns);
                 r.bytes        = map_field<std::uint64_t>(p, k.byte_capacity);
                 map.push_back(std::move(r));
-                map_units.push_back(reinterpret_cast<MapUnit*>(
-                    const_cast<std::uint8_t*>(map_unit(k, screen, i))));
             }
             for (auto it = forbidden_.begin(); it != forbidden_.end();) {
                 bool present = false;
@@ -467,16 +458,10 @@ void Watcher::run() {
         }
         if (read_content) {
             content_now_.clear();
-            // [[COW-EDIT 33]] Each pool's bytes are read inside a granted
-            // arrival on that pool. Refused — flagged for destruction or
-            // gone — it is not read.
-            for (std::size_t i = 0; i < map.size(); ++i) {
-                const PoolRecord& p = map[i];
+            // [[COW-EDIT 33]]
+            for (const PoolRecord& p : map) {
                 if (forbidden_.count(p.id)) continue;
-                const PoolRead pool_read = pool_maintenance().arrive(map_units[i]);
-                if (!pool_read.granted) continue;
                 content_now_.emplace(p.id, WatcherItem{ pool_content(p), p });
-                pool_maintenance().leave(pool_read);
             }
             // Content is the map less the forbidden; so is its view. Nothing
             // is classified a second time.
@@ -490,7 +475,6 @@ void Watcher::run() {
             less_forbidden(view.by_turn,   content_view_now_.by_turn);
             less_forbidden(view.by_prompt, content_view_now_.by_prompt);
         }
-        pool_maintenance().leave(map_read);   // [[COW-EDIT 34]] the map read ends; ungranted is a no-op
         for (const auto& [name, w] : flags_)
             if (asleep ? w.background > 0 : true) flags_now_[name] = single(flag_value(name));
         for (const auto& [path, w] : files_)
@@ -553,7 +537,7 @@ void Watcher::run() {
                 if (snapshot_of(e, false) == nullptr || snapshot_of(e, true) == nullptr) comparable = false;
             if (!comparable) continue;
 
-            // ---- what is eligible on each trigger (Ruling 2) ---------------
+            // ---- what is eligible on each trigger ---------------
             for (std::size_t k = 0; k < r.triggers.size(); ++k) {
                 const Entry&    e        = r.triggers[k];
                 const Snapshot& now      = *snapshot_of(e, false);
@@ -592,7 +576,7 @@ void Watcher::run() {
             }
 
             // ---- complete matches. What is used leaves the eligible list
-            // now; the record of it is written last (Ruling 2). -------------
+            // now; the record of it is written last. -------------
             std::vector<std::vector<std::string>> used(r.triggers.size());
             std::uint64_t complete = 0;
             if (r.combine == Combine::And) {
@@ -611,7 +595,7 @@ void Watcher::run() {
             }
             if (complete == 0) continue;
 
-            // ---- the checks, at this moment only (Ruling 4) ----------------
+            // ---- the checks, at this moment only ----------------
             bool passes = true;
             for (const Entry& c : r.checks) {
                 const Snapshot* now = snapshot_of(c, false);
@@ -622,7 +606,7 @@ void Watcher::run() {
                 if (ids.empty()) passes = false;
             }
 
-            // ---- deliver, count (Rulings 3, 12) ----------------------------
+            // ---- deliver, count ----------------------------
             bool leaves = false;
             if (passes) {
                 const std::uint64_t firings = r.count == 0 ? complete : std::min(complete, l.remaining);
@@ -645,7 +629,7 @@ void Watcher::run() {
         }
         for (std::size_t n = fired_out.size(); n-- > 0;) remove(fired_out[n]);
 
-        // ---- G. BOOKKEEPING — the forbidden list (Ruling 5): additions,
+        // ---- G. BOOKKEEPING — the forbidden list: additions,
         // then, if it changed this pass, a complete copy published whole.
         // Then previous becomes current for everything read this pass; a
         // pool read's view of itself goes with it.

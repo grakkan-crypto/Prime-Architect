@@ -13,7 +13,7 @@
 //
 // ===========================================================================
 // OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
-// definition. It is raised with the user, never made.
+// definition and is never made.
 //
 // 1. LIVEREGISTRY SORTS AND ORGANISES; IT DOES NOT COMPUTE.
 //    Reserving a known name's fixed number, or counting sequentially through
