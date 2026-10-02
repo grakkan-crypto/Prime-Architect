@@ -11,9 +11,7 @@
 #include <cstdlib>
 #include <deque>
 #include <map>
-#include <mutex>
 #include <set>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -40,15 +38,15 @@ namespace {
 // The input pools the matching serves, by registry name (coder.cpp).
 constexpr const char* kInputPools[] = { "ANALYST_INPUT", "ADEPT_INPUT" };
 
-// The map key: asked for once, before the first visit of the session, held.
-std::once_flag key_once;
-MapKey         key;
+// The map key: taken before the first visit of the session, held.
+bool   has_key = false;
+MapKey key;
 
-// The prompt ID of the newest pool.
+// The prompt ID being evaluated.
 std::string held;
 
-// The prompt agents: every agent with write access on an input pool, each
-// once. Held for the pipeline's lifespan.
+// The prompt agents: every agent with write access on an input pool. Held
+// for the pipeline's lifespan.
 std::vector<std::string> prompt_agents;
 
 // One pool's lifts in the evaluation: its most recent, oldest first, and the
@@ -59,24 +57,21 @@ struct Track {
     std::uint64_t     count = 0;
 };
 
-// The evaluation of the held prompt ID: the prompt ID being evaluated, each
-// pool's lifts, and the pools noted against it.
-std::string                  evaluating;
+// Each pool's lifts, and the pools noted against the held prompt ID.
 std::map<std::string, Track> tracks;
 std::vector<std::string>     noted;
 
 // The evaluation's thresholds. A pool qualifies once it has kSettle recent
 // lifts and either their mean reaches kSustained, or at least kStandoutHits
-// of its last kStandoutWindow lifts reach kStandout. A noted pool that no
-// longer qualifies is taken off once the mean of all its lifts is below
-// kBackground.
-constexpr std::size_t kSettle        = 8;
-constexpr std::size_t kWindow        = 16;
-constexpr float       kSustained     = 2.5f;
-constexpr float       kStandout      = 10.0f;
+// of its last kStandoutWindow lifts reach kStandout. A noted pool is taken
+// off once the mean of all its lifts is below kBackground.
+constexpr std::size_t kSettle         = 8;
+constexpr std::size_t kWindow         = 16;
+constexpr float       kSustained      = 2.5f;
+constexpr float       kStandout       = 10.0f;
 constexpr std::size_t kStandoutWindow = 8;
-constexpr std::size_t kStandoutHits  = 3;
-constexpr double      kBackground    = 1.0;
+constexpr std::size_t kStandoutHits   = 3;
+constexpr double      kBackground     = 1.0;
 
 // A pool ID's sequence number: what follows its last '-'.
 std::uint64_t sequence(const std::string& pool_id) {
@@ -95,8 +90,7 @@ void ContextMatcher_Watch() {
 
         const PoolDeclaration d = live_registry().pool(pool)->declaration;
         for (const PoolAgent& a : d.agents)
-            if (permission_key::bit_set(a.bits, permission_key::write_bit(d.mask_count)) &&
-                std::find(prompt_agents.begin(), prompt_agents.end(), a.agent) == prompt_agents.end())
+            if (permission_key::bit_set(a.bits, permission_key::write_bit(d.mask_count)))
                 prompt_agents.push_back(a.agent);
 
         Entry e;
@@ -120,49 +114,35 @@ void ContextMatcher_Watch() {
 }
 
 bool ContextMatcher_Receive(const std::string&, const std::string& message) {
-    std::thread([pool = message]() {
-        const std::uint64_t class_id = live_registry().class_id_for(pool);
-        const bool wellness_check_context_matcher_class_found = class_id != 0;
-        (void)wellness_check_context_matcher_class_found;
-        if (class_id == 0) return;
+    const std::uint64_t class_id = live_registry().class_id_for(message);
 
-        std::call_once(key_once, [] { key = pool_maintenance().map_key(); });
-        const void* screen = live_registry().screen;
+    if (!has_key) { key = pool_maintenance().map_key(); has_key = true; }
+    const void* screen = live_registry().screen;
 
-        const std::uint8_t* newest = nullptr;
-        std::uint64_t       seq    = 0;
-        std::string         prompt;
-        const PoolRead read = pool_maintenance().arrive(nullptr);
-        const bool wellness_check_context_matcher_map_read_granted = read.granted;
-        (void)wellness_check_context_matcher_map_read_granted;
-        if (read.granted)
-            for (std::uint64_t i = 0; i < key.unit_count; ++i) {
-                const std::uint8_t* p = map_record(key, screen, i, read.stamp);
-                if (p == nullptr || map_field<std::uint64_t>(p, key.class_id) != class_id) continue;
-                const std::uint64_t n = sequence(map_field<std::string>(p, key.pool_id));
-                if (newest != nullptr && n <= seq) continue;
-                newest = p;
-                seq    = n;
-                prompt = *map_field<std::set<std::string>>(p, key.prompt_ids).begin();
-            }
-        pool_maintenance().leave(read);
+    const std::uint8_t* newest = nullptr;
+    std::uint64_t       seq    = 0;
+    std::string         prompt;
+    const PoolRead read = pool_maintenance().arrive(nullptr);
+    for (std::uint64_t i = 0; i < key.unit_count; ++i) {
+        const std::uint8_t* p = map_record(key, screen, i, read.stamp);
+        if (p == nullptr || map_field<std::uint64_t>(p, key.class_id) != class_id) continue;
+        const std::uint64_t n = sequence(map_field<std::string>(p, key.pool_id));
+        if (newest != nullptr && n <= seq) continue;
+        newest = p;
+        seq    = n;
+        prompt = *map_field<std::set<std::string>>(p, key.prompt_ids).begin();
+    }
+    pool_maintenance().leave(read);
 
-        const bool wellness_check_context_matcher_class_on_map = newest != nullptr;
-        (void)wellness_check_context_matcher_class_on_map;
-        if (newest == nullptr) return;
-        live_registry().link_prompt(prompt, {});
-        held = std::move(prompt);
-    }).detach();
+    live_registry().link_prompt(prompt, {});
+    held = std::move(prompt);
     return true;
 }
 
 void ContextMatcher_Evaluate(const AttentionStep& step) {
-    if (evaluating != held) { evaluating = held; tracks.clear(); noted.clear(); }
-    if (evaluating.empty()) return;
     if (step.last) {
-        live_registry().link_prompt(evaluating, std::move(noted));
+        live_registry().link_prompt(held, std::move(noted));
         held.clear();
-        evaluating.clear();
         tracks.clear();
         noted.clear();
         return;
@@ -171,38 +151,34 @@ void ContextMatcher_Evaluate(const AttentionStep& step) {
     std::uint64_t all = 0;
     for (const PoolAttention& p : step.pools) all += p.tokens;
 
-    std::vector<std::string> added, removed;
     for (const PoolAttention& p : step.pools) {
         Track& t = tracks[p.pool_id];
-        const float lift = p.tokens != 0 && step.class_total > 0.0f
-                               ? p.weight / step.class_total * static_cast<float>(all) / static_cast<float>(p.tokens)
-                               : 0.0f;
+        const float lift = p.weight / step.class_total * static_cast<float>(all) / static_cast<float>(p.tokens);
         t.recent.push_back(lift);
         if (t.recent.size() > kWindow) t.recent.pop_front();
         t.sum += lift;
         ++t.count;
 
-        bool qualifies = false;
-        if (t.recent.size() >= kSettle) {
-            float       sum  = 0.0f;
-            std::size_t hits = 0;
-            for (std::size_t i = 0; i < t.recent.size(); ++i) {
-                sum += t.recent[i];
-                if (i + kStandoutWindow >= t.recent.size() && t.recent[i] >= kStandout) ++hits;
-            }
-            qualifies = sum / static_cast<float>(t.recent.size()) >= kSustained || hits >= kStandoutHits;
-        }
-
         const auto at = std::find(noted.begin(), noted.end(), p.pool_id);
-        if (at == noted.end()) {
-            if (qualifies) { noted.push_back(p.pool_id); added.push_back(p.pool_id); }
-        } else if (!qualifies && t.sum / static_cast<double>(t.count) < kBackground) {
-            noted.erase(at);
-            removed.push_back(p.pool_id);
+        if (at != noted.end()) {
+            if (t.sum / static_cast<double>(t.count) < kBackground) {
+                noted.erase(at);
+                Masking_Unlink({ held }, { p.pool_id });
+            }
+            continue;
+        }
+        if (t.recent.size() < kSettle) continue;
+        float       sum  = 0.0f;
+        std::size_t hits = 0;
+        for (std::size_t i = 0; i < t.recent.size(); ++i) {
+            sum += t.recent[i];
+            if (i + kStandoutWindow >= t.recent.size() && t.recent[i] >= kStandout) ++hits;
+        }
+        if (sum / static_cast<float>(t.recent.size()) >= kSustained || hits >= kStandoutHits) {
+            noted.push_back(p.pool_id);
+            Masking_Link({ held }, { p.pool_id });
         }
     }
-    if (!added.empty())   Masking_Link({ evaluating }, added);
-    if (!removed.empty()) Masking_Unlink({ evaluating }, removed);
 }
 
 void ContextMatcher_Release(const std::vector<std::string>& prompt_ids) {
