@@ -28,97 +28,6 @@
 //   Co-dependent. The RAM Manager supplies the RAM; this file decides how it
 //   is used and what is returned. Neither sits above the other.
 //
-// ===========================================================================
-// OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
-// definition. It is raised with the user, never made.
-//
-// 1. A POOL IS BYTES. NEVER TOKENS.
-//    No field, function, or comment on this file ever expresses size,
-//    capacity, or content in tokens. Multiple agents with different
-//    tokenisers read the same pool; there is no shared token unit to size
-//    against.
-//
-// 2. A POOL HAS NO NAME. POOL ID IS THE ONLY IDENTITY.
-//    No human-readable label is ever added to a pool, and nothing is ever
-//    keyed by one.
-//
-// 3. CLASS ID IS READ, NEVER HELD, NEVER WRITTEN BACK.
-//    This file never hardcodes a Class ID as a literal, never re-derives
-//    one, and never writes to the class table. A caller supplies the number
-//    or the name; a name is resolved by a direct read at that moment, every
-//    time.
-//
-// 4. THE STAMP IS FIXED AT MINT.
-//    Pool ID, Turn ID, Prompt ID(s), timestamp never change after creation.
-//    Class ID is the only field Reclassify may change, and Reclassify
-//    changes nothing else — no cascading writes, no side effects, no reach
-//    into any other file's state.
-//
-// 5. THIS FILE HOLDS THE MAP, AND IT NEVER LEAVES.
-//    The map is held here and nowhere else. No copy of it, or of any part of
-//    it, is held anywhere. The map appears on the screen, on LiveRegistry:
-//    this file's own memory, shown there, not a copy. This file alone
-//    changes what the screen shows. This file states the map's layout. It
-//    offers no lookup, no find, no enumeration of pools by any criterion, to
-//    any caller.
-//
-// 6. ONE FILTER, NO VARIANTS.
-//    Destroy, Flag, and Unflag share the one filter shape — Class ID, Turn
-//    ID, Prompt ID, Pool ID, AND'd, with exclusions. A new combination a
-//    caller needs is expressed through that filter. It is never given its
-//    own function.
-//
-// 7. IMMUNITY IS SCOPED, NEVER BLANKET.
-//    A flag protects a pool from exactly the source named and no other.
-//    Destroy checks this as part of its own execution; no caller ever
-//    performs that check itself.
-//
-// 8. NO REFUSAL IS SILENT. NOTHING IS REVERTED.
-//    A create, grow, or reclassify that cannot complete returns nothing
-//    usable and leaves nothing standing in place of what was asked for. A
-//    wellness flag reports the true outcome; no stand-in value is ever
-//    substituted for a missing one. Nothing is ever undone to tidy up.
-//
-// 9. THIS FILE IS MECHANICAL.
-//    It never decides whether a pool should be destroyed, flagged, or kept.
-//    It executes exactly what a caller, holding that authority, tells it to
-//    do.
-//
-// 10. CHUNK SIZE IS THE OS'S FACT, NOT THIS FILE'S FIGURE.
-//    One chunk is one unit as the OS reports it, uniform across every pool,
-//    and never written onto an entry. No byte count is ever invented or
-//    hardcoded here in its place.
-//
-// 11. AN EDIT IS MADE ELSEWHERE AND SWITCHED IN ONLY ONCE THE LIVE MAP HAS
-//    NO READER.
-//    The live map's bytes never change under a reader. From the moment an
-//    edit begins, arrivals are shown a static image of the map as it stood;
-//    the edit is built elsewhere and switched into the live map when its
-//    last reader leaves. Nothing waits for that: the last leave is the
-//    switch. The image is a working copy for its readers alone, never kept
-//    in step, and released when its last reader leaves.
-//
-// 12. EVERY READ OF THE SCREEN PASSES THE BARRIER, AND IS ALWAYS PERMITTED.
-//    The barrier is how this file knows who is reading which version, and
-//    what it chooses to show each arrival. It never refuses a reader of the
-//    screen. A read of a pool's bytes is granted at the pool's own barrier:
-//    Arrive and Leave are the only way into a pool, and that read is
-//    exactly the span between them. A read cannot be taken anywhere, passed
-//    on, or kept beyond its reader.
-//
-// 13. DESTROY ALONE ENDS A POOL, AND ONLY ONCE ITS LAST READER HAS LEFT.
-//    Destroy flags the pool for destruction and refuses every new arrival
-//    on it. Readers already in it carry on unrestricted. When the last one
-//    leaves, the pool leaves the map and its chunks are released. Nothing
-//    else pre-empts or brings forward a destruction.
-//
-// 14. THE MAP IS FIXED-SIZE UNITS.
-//    The map is the set of pools: a pool's unit holding it and the pool
-//    existing are the same fact. No second store, no log, no derivation.
-//    Ownership runs strictly downward: map, unit, chunk list, bytes. The map
-//    never holds pool bytes, and nothing here ever copies them.
-// ===========================================================================
-//
 // WHAT A POOL IS
 //   One unit on the pool map. Its identity, its Class ID, its immunity, its
 //   destruction flag and its chunks are fields on that one unit — not a
@@ -149,48 +58,52 @@
 //   caller is minting.
 //
 // BOOT
-//   The claim of one continuous block of 80 GiB from the RAM Manager, and
-//   the claim of the screen's bytes on LiveRegistry. The map is an element
-//   of that block. Whether the block stands is posted to Wellness.
+//   The claim of one continuous block of 80 GiB from the RAM Manager, 1 GiB
+//   of it designated RAM and the rest VRAM, stated in the one request. The
+//   RAM part holds the map and every preserved section. The VRAM part is
+//   pool memory. Whether the block stands is posted to Wellness.
 //
 // RAM
-//   The RAM held is the boot block and every stretch received since. Free
-//   is what is held less what pools are using. Pool Maintenance asks the
-//   RAM Manager for more when, at its current rate of growth, its free space
-//   would run out before an exchange could complete; it asks for what that
-//   rate consumes over one exchange. The RAM Manager asks for RAM back by
-//   the same rule on its side; Pool Maintenance chooses which bytes go and
-//   never gives up bytes in use. Every exchange is posted to Wellness by
+//   Pool memory held is the VRAM part of the boot block and every stretch
+//   received since. Free is what is held less what pools are using. The
+//   rise is the net change in use, spawned less destroyed, over the last
+//   exchange's length of time. On every spawn and grow: free below the rise,
+//   the rise is asked for. The RAM Manager asks for RAM back by the same rule
+//   on its side; Pool Maintenance chooses which bytes go and never gives up
+//   bytes in use or its RAM part. Every exchange is posted to Wellness by
 //   both sides, and the exchange still happens. Continuity is required of
 //   the boot block alone.
 //
-// THE MAP AND ITS READS
-//   The map is held here, and appears on the screen, on LiveRegistry: the
-//   live map as the same memory, not a copy. Every read of the map is on the screen. No
-//   other path to the map exists. The map cannot be taken anywhere, only
-//   read.
+// THE SCREEN
+//   When LiveRegistry starts up, whenever that is, it tells Pool
+//   Maintenance, and Pool Maintenance claims the screen there: the
+//   reflection of the map, naming the map's real memory here. The map never
+//   leaves Pool Maintenance and nothing is copied to LiveRegistry.
 //
-//   READ. Every arrival at the screen passes its barrier, is always
-//   permitted, and is shown either the live map or a static image of it.
-//   It is a reader of that version until it leaves.
+//   READ. A reader holds the screen and resolves each section through the
+//   reflection, reading the bytes it lands on: the map's real bytes, or a
+//   preserved section while that section is being edited. Holding the
+//   screen is the arrival and letting go is the leave; nothing is asked or
+//   told.
+//
+//   EDIT, per section (one pool's entry):
+//     PRESERVE. The section's pre-edit contents are put into a separate
+//     piece of the RAM part, untouched.
+//     REDIRECT. For as long as the edit is in progress, the section resolves
+//     to the preserved bytes, for every reader.
+//     EDIT. The real section is edited in place, at full pace.
+//     LIFT. The instant the edit is finished the redirect is removed; the
+//     section resolves straight to the real bytes again.
+//     FREE. The preserved section is freed once the last reader that landed
+//     on it lets go.
+//   No reader sees an edit in progress. No reader waits and no edit waits.
 //
 //   NO POOLS, NO MAP. The map is the pools. With no pool standing the screen
 //   shows nothing, and that is correct: it is not a failure, not an empty
 //   state to repair, and nothing is placed there to fill it.
 //
-//   EDIT:
-//     IMAGE. When an edit begins and no image is showing, a static image of
-//     the map is taken and shown to every new arrival. Readers already on
-//     the live map carry on reading it.
-//     BUILD. The edit is made elsewhere. The live map is not touched.
-//     SWITCH. When the live map's last reader leaves, or at once if it has
-//     none, every edit built is switched into the live map and the screen
-//     shows the live map again.
-//     RELEASE. An image's readers keep it until they leave; it is released
-//     when its last reader leaves.
-//
 //   THE KEY. Before its first visit of the session, a reader asks this
-//   file for the map key and keeps it. It reads the screen only through the
+//   file for the map key and keeps it. It reads a section only through the
 //   key.
 //
 //   A pool's bytes are gated: a reader arrives on the pool, is a current
@@ -203,8 +116,8 @@
 //   answered, never read again here. Wellness sees them because they exist.
 //
 // OS_OWES
-//   The marker word (live_registry.h). The OS supplies the chunks; each is
-//   declared where it is called.
+//   The marker word. The OS supplies the chunks; each is declared where it
+//   is called.
 
 #pragma once
 
@@ -263,34 +176,30 @@ struct Gate {
     bool                         closed = false;
 };
 
-// One unit: one pool position. Its record is `records[i]` on the live map;
-// `present` false: no pool. `staged`: an edit built for it in `next[i]`,
-// `staged_present` whether a pool stands once it is switched in.
+// A section's pre-edit contents, preserved in the RAM part for the readers
+// that land on it. `next_free`: the RAM part's free preserved sections.
+struct Preserved {
+    Pool          entry;
+    bool          present   = false;
+    std::uint64_t readers   = 0;
+    bool          lifted    = false;
+    Preserved*    next_free = nullptr;
+};
+
+// One section: one pool's entry, in place in the RAM part. `present` false:
+// no pool. `redirect` non-null: the section resolves to the preserved bytes.
 struct MapUnit {
-    Gate gate;
-    bool present = false, staged = false, staged_present = false;
+    Pool                    record;
+    bool                    present = false;
+    std::atomic<Preserved*> redirect{nullptr};
+    Gate                    gate;
 };
 
-// Held by Pool Maintenance alone. `records` is the live map; `next` is
-// where edits are built.
+// Held by Pool Maintenance alone, in its RAM part. Sections sit where they
+// are, from the start of the RAM part.
 struct PoolMap {
-    Pool*         records    = nullptr;
-    Pool*         next       = nullptr;
-    MapUnit*      units      = nullptr;
-    std::uint64_t unit_count = 0;
-};
-
-// A static image of the map, for the readers shown it.
-struct ScreenImage {
-    Pool*         records = nullptr;
-    std::uint64_t readers = 0;
-};
-
-// One read of the screen. `bytes` is what this reader was shown; `image`
-// null: the live map.
-struct ScreenRead {
-    const void*  bytes = nullptr;
-    ScreenImage* image = nullptr;
+    MapUnit*                   units = nullptr;
+    std::atomic<std::uint64_t> unit_count{0};
 };
 
 // A stretch of RAM, held or handed back.
@@ -307,15 +216,10 @@ struct PoolRead {
     bool          granted = false;
 };
 
-// THE MAP KEY — how to read the screen. Handed out by Pool
-// Maintenance; a map reader asks for it once, before its first visit of the
-// session, and keeps it. Every position is a byte offset. A reader reads the
-// map only through the key, never through the layout above, so a change to
-// the layout is a change to Pool Maintenance alone.
+// THE MAP KEY — how to read a section. Handed out by Pool Maintenance; a map
+// reader asks for it once, before its first visit of the session, and keeps
+// it. Every position is a byte offset into a section.
 struct MapKey {
-    // the screen
-    std::uint64_t unit_count = 0, unit_size = 0;
-    // one pool record
     std::uint64_t pool_id = 0, class_id = 0, turn_id = 0, prompt_ids = 0, timestamp_ns = 0,
                   byte_capacity = 0, flagged_for_destruction = 0;
 };
@@ -326,11 +230,23 @@ inline const T& map_field(const std::uint8_t* at, std::uint64_t offset) {
     return *reinterpret_cast<const T*>(at + offset);
 }
 
-// One access to one unit: the pool record where it appears
-// on the screen, found through the key.
-inline const std::uint8_t* map_record(const MapKey& k, const void* screen, std::uint64_t unit) {
-    return static_cast<const std::uint8_t*>(screen) + unit * k.unit_size;
-}
+// THE SCREEN, HELD. Holding it is the arrival; its end is the leave. Each
+// section resolves through the reflection to the bytes it lands on; null:
+// no pool there. Not copyable, not movable: the reader's own.
+class ScreenRead {
+public:
+    explicit ScreenRead(const PoolMap* reflection);
+    ~ScreenRead();
+    ScreenRead(const ScreenRead&)            = delete;
+    ScreenRead& operator=(const ScreenRead&) = delete;
+
+    std::uint64_t       unit_count() const;
+    const std::uint8_t* unit(std::uint64_t i);
+
+private:
+    const PoolMap*          map_;
+    std::vector<Preserved*> landed_;
+};
 
 // ---------------------------------------------------------------------------
 // POOL MAINTENANCE
@@ -352,21 +268,20 @@ public:
     MapKey   map_key() const;
 
     // ---- boot ----------------------------------------------------------------
-    // One continuous block of 80 GiB claimed from the RAM Manager, and the
-    // screen's bytes claimed on LiveRegistry. Nothing is returned; whether
-    // the block stands is posted to Wellness.
+    // One continuous block of 80 GiB claimed from the RAM Manager, 1 GiB
+    // designated RAM and the rest VRAM. Nothing is returned; whether the
+    // block stands is posted to Wellness.
     void boot();
 
     // ---- the screen ----------------------------------------------------------
-    // Always permitted. The reader is shown the live map, or the static image
-    // while an edit is pending, and reads only what it was shown until it
-    // leaves.
-    ScreenRead arrive_screen();
-    void       leave_screen(const ScreenRead& read);
+    // LiveRegistry, starting up, tells Pool Maintenance; the reflection of
+    // the map is claimed there.
+    void claim_screen(LiveRegistry& registry);
 
     // ---- RAM back to the RAM Manager -----------------------------------------
     // The RAM Manager asking for `bytes`. Pool Maintenance chooses which
-    // bytes go, never bytes in use, and hands them over.
+    // bytes go, never bytes in use and never its RAM part, and hands them
+    // over.
     std::vector<Stretch> give_back(std::uint64_t bytes);
 
     PoolRead arrive(MapUnit* unit);
@@ -420,6 +335,8 @@ public:
     Reclassify reclassify(const std::string& pool_id, const ClassRef& cls);
 
 private:
+    friend class ScreenRead;
+
     // The number the caller gave, or the number LiveRegistry holds for the
     // name it gave. Zero is "no such class". Used by create and reclassify.
     static std::uint64_t resolve_class(const ClassRef& cls);
@@ -428,53 +345,52 @@ private:
     // flag and unflag — the one matcher.
     static bool matches(const Pool& p, const PoolFilter& f);
 
-    // One chunk from the OS onto the end of the pool. Caller holds the lock.
+    // One chunk from the OS onto the end of the pool; the rise checked and
+    // asked for. Caller holds the lock.
     bool take_chunk_locked(Pool& p);
 
-    // The one edit, per unit: built in `next`, an image shown to arrivals
-    // if none is, switched in once the live map has no reader. Caller holds
-    // the lock.
-    void write_unit_locked(PoolMap& map, MapUnit& u, Pool next, bool present);
+    // A change in pool use, folded into the rise. Caller holds the lock.
+    void use_locked(double delta);
 
-    // Every built edit into the live map; the screen back on it; images
-    // with no reader released. Caller holds both locks.
-    void switch_in_locked(PoolMap& map);
+    // The one edit, per section: preserved, redirected, edited in place,
+    // lifted. False: no preserved section could be taken; nothing edited.
+    // Caller holds the lock.
+    bool write_unit_locked(MapUnit& u, Pool next, bool present);
 
-    // A unit's pool as this file has it: the built edit if there is one,
-    // else the live record. Null: no pool.
-    static const Pool* view(const PoolMap& map, const MapUnit& u);
+    // A preserved section with no reader and no redirect goes back to the
+    // RAM part. Caller holds the screen's lock.
+    void free_preserved_locked(Preserved* p);
 
     // The unit holding this pool, live and not flagged for
     // destruction; null if none. Used by create, grow, reclassify.
-    static MapUnit* live_unit(PoolMap& map, const std::string& pool_id);
-
-    // More RAM from the RAM Manager: `bytes`, the exchange timed. Caller
-    // holds the lock.
-    void ask_locked(std::uint64_t bytes);
+    MapUnit* live_unit(const std::string& pool_id);
 
     // The pool leaves the map; its chunks go back. Its gate
     // is closed and empty. Caller holds the lock. Used by destroy and leave.
-    void end_pool_locked(PoolMap& map, MapUnit& u);
+    void end_pool_locked(MapUnit& u);
 
-    // The RAM held: the boot block first, every stretch received after it.
+    // The RAM part: the map from its start, preserved sections from its end.
+    std::uint8_t* ram_        = nullptr;
+    std::uint64_t ram_bytes_  = 0;
+    std::uint8_t* preserved_low_ = nullptr;
+    Preserved*    free_preserved_ = nullptr;
+
+    // Pool memory held: the VRAM part first, every stretch received after it.
     // Wholly this file's.
     std::vector<Stretch> held_;
     std::uint64_t        held_bytes_ = 0, used_bytes_ = 0;
-    // The last exchange with the RAM Manager, and the last chunk taken.
-    std::uint64_t        exchange_ns_ = 0, last_take_ns_ = 0;
+    // The last exchange's length; the rise over it; the last change in use.
+    std::uint64_t        exchange_ns_ = 0, last_use_ns_ = 0;
+    double               rise_ = 0.0;
 
     // The map. Held here alone.
     PoolMap map_;
 
-    // The screen's barrier: readers on the live map, the image shown to new
-    // arrivals (null: the live map), every image still read.
-    std::uint64_t             live_readers_ = 0;
-    ScreenImage*              showing_      = nullptr;
-    std::vector<ScreenImage*> images_;
-    std::mutex                screen_mutex_;
+    // Landing on and leaving a preserved section, and its redirect.
+    std::mutex screen_mutex_;
 
     // This file's callers, one at a time on the map. Taken before the
-    // screen's barrier, never after.
+    // screen's lock, never after.
     mutable std::mutex mutex_;
 };
 

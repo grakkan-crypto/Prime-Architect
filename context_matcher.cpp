@@ -115,10 +115,12 @@ bool ContextMatcher_Receive(const std::string&, const std::string& message) {
         const std::uint64_t class_id = live_registry().class_id_for(message);
 
         if (!has_key) { key = pool_maintenance().map_key(); has_key = true; }
-        const void* screen = live_registry().screen;
+        ScreenRead screen(live_registry().screen);
+        const std::uint64_t n = screen.unit_count();
 
-        for (std::uint64_t i = 0; i < key.unit_count; ++i) {
-            const std::uint8_t* p = map_record(key, screen, i);
+        for (std::uint64_t i = 0; i < n; ++i) {
+            const std::uint8_t* p = screen.unit(i);
+            if (p == nullptr) continue;
             if (map_field<std::uint64_t>(p, key.class_id) != class_id) continue;
             held = *map_field<std::set<std::string>>(p, key.prompt_ids).begin();
             break;
