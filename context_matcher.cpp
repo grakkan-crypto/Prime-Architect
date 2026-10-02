@@ -7,6 +7,7 @@
 #include "watcher.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <deque>
@@ -19,14 +20,15 @@
 // BUILD OUTLINE — TO BE REMOVED ONCE MASKING IS BUILT.
 // Masking is told of every change to a prompt ID's pools as it is made: the
 // prompt IDs and the pool IDs just noted against them, or just taken off
-// them. Called exactly as it will exist; its real header replaces these
-// declarations outright.
+// them. Masking hands back its receipt, "got it", and nothing else. Called
+// exactly as it will exist; its real header replaces these declarations
+// outright.
 // ---------------------------------------------------------------------------
 namespace prime {
 
-void Masking_Link(const std::vector<std::string>& prompt_ids,
+bool Masking_Link(const std::vector<std::string>& prompt_ids,
                   const std::vector<std::string>& pool_ids);
-void Masking_Unlink(const std::vector<std::string>& prompt_ids,
+bool Masking_Unlink(const std::vector<std::string>& prompt_ids,
                     const std::vector<std::string>& pool_ids);
 
 } // namespace prime
@@ -140,8 +142,23 @@ bool ContextMatcher_Receive(const std::string&, const std::string& message) {
 }
 
 void ContextMatcher_Evaluate(const AttentionStep& step) {
+    {
+        double                sum = 0.0;
+        bool                  ok  = step.class_total > 0.0f;
+        std::set<std::string> seen;
+        for (const PoolAttention& p : step.pools) {
+            ok = ok && p.weight >= 0.0f && p.tokens > 0 && seen.insert(p.pool_id).second;
+            sum += p.weight;
+        }
+        const bool wellness_check_context_matcher_step_well_formed =
+            ok && std::fabs(sum - step.class_total) <= step.class_total * 1e-3;
+        (void)wellness_check_context_matcher_step_well_formed;
+    }
+
     if (step.last) {
-        live_registry().link_prompt(held, std::move(noted));
+        live_registry().link_prompt(held, noted);
+        const bool wellness_check_context_matcher_pools_posted = live_registry().linked_pools(held) == noted;
+        (void)wellness_check_context_matcher_pools_posted;
         held.clear();
         tracks.clear();
         noted.clear();
@@ -163,7 +180,8 @@ void ContextMatcher_Evaluate(const AttentionStep& step) {
         if (at != noted.end()) {
             if (t.sum / static_cast<double>(t.count) < kBackground) {
                 noted.erase(at);
-                Masking_Unlink({ held }, { p.pool_id });
+                const bool wellness_check_context_matcher_masking_unlinked = Masking_Unlink({ held }, { p.pool_id });
+                (void)wellness_check_context_matcher_masking_unlinked;
             }
             continue;
         }
@@ -176,7 +194,8 @@ void ContextMatcher_Evaluate(const AttentionStep& step) {
         }
         if (sum / static_cast<float>(t.recent.size()) >= kSustained || hits >= kStandoutHits) {
             noted.push_back(p.pool_id);
-            Masking_Link({ held }, { p.pool_id });
+            const bool wellness_check_context_matcher_masking_linked = Masking_Link({ held }, { p.pool_id });
+            (void)wellness_check_context_matcher_masking_linked;
         }
     }
 }
