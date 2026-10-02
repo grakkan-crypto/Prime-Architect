@@ -205,4 +205,8 @@ void ContextMatcher_Evaluate(const AttentionStep& step) {
     if (!removed.empty()) Masking_Unlink({ evaluating }, removed);
 }
 
+void ContextMatcher_Release(const std::vector<std::string>& prompt_ids) {
+    for (const std::string& id : prompt_ids) live_registry().unlink_prompt(id);
+}
+
 } // namespace prime
