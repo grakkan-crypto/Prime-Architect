@@ -10,7 +10,7 @@
 //
 //   It is told by Watcher when an input pool appears, takes that pool's
 //   prompt ID from the pool map, and evaluates each generation step's
-//   attention against it. The step that produced the end token is not
+//   attention against it. The step that produced the stop token is not
 //   evaluated: on it, the prompt ID's pools are posted to LiveRegistry and
 //   everything held for that prompt ID is cleared. At interaction end, the
 //   prompt IDs reported to it are released: their rows are removed from
@@ -21,10 +21,6 @@
 // definition. It is raised with the user, never made.
 //
 // INVARIANTS
-//
-//   CM-1  MUST CHOOSE THE NEWEST POOL BY THE GREATEST POOL ID, because pool
-//         IDs are the one ordering guaranteed to increase. Not by creation
-//         time, not by prompt ID.
 //
 //   CM-2  MUST FIND PROMPT AGENTS FROM THE PIPELINE'S PERMISSION TABLE, BY
 //         AGENT NAME, AND MUST NOT NAME THEM HERE OR KEY THEM BY MODEL,
@@ -63,12 +59,12 @@ struct PoolAttention {
 };
 
 // One generated token's Class 1 attention: its total to Class 1, its
-// attention to each Class 1 pool, and whether this step produced the end
+// attention to each Class 1 pool, and whether this step produced the stop
 // token.
 struct AttentionStep {
     float                      class_total = 0.0f;
     std::vector<PoolAttention> pools;
-    bool                       last        = false;
+    bool                       stop_token  = false;
 };
 
 // Registers one Watcher request per input pool the registry knows.

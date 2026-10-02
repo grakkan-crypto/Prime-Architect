@@ -9,10 +9,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
 #include <deque>
 #include <map>
 #include <set>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -75,11 +75,6 @@ constexpr std::size_t kStandoutWindow = 8;
 constexpr std::size_t kStandoutHits   = 3;
 constexpr double      kBackground     = 1.0;
 
-// A pool ID's sequence number: what follows its last '-'.
-std::uint64_t sequence(const std::string& pool_id) {
-    return std::strtoull(pool_id.c_str() + pool_id.rfind('-') + 1, nullptr, 10);
-}
-
 } // namespace
 
 void ContextMatcher_Watch() {
@@ -116,26 +111,19 @@ void ContextMatcher_Watch() {
 }
 
 bool ContextMatcher_Receive(const std::string&, const std::string& message) {
-    const std::uint64_t class_id = live_registry().class_id_for(message);
+    std::thread([message]() {
+        const std::uint64_t class_id = live_registry().class_id_for(message);
 
-    if (!has_key) { key = pool_maintenance().map_key(); has_key = true; }
-    const void* screen = live_registry().screen;
+        if (!has_key) { key = pool_maintenance().map_key(); has_key = true; }
+        const void* screen = live_registry().screen;
 
-    const std::uint8_t* newest = nullptr;
-    std::uint64_t       seq    = 0;
-    std::string         prompt;
-    for (std::uint64_t i = 0; i < key.unit_count; ++i) {
-        const std::uint8_t* p = map_record(key, screen, i);
-        if (map_field<std::uint64_t>(p, key.class_id) != class_id) continue;
-        const std::uint64_t n = sequence(map_field<std::string>(p, key.pool_id));
-        if (newest != nullptr && n <= seq) continue;
-        newest = p;
-        seq    = n;
-        prompt = *map_field<std::set<std::string>>(p, key.prompt_ids).begin();
-    }
-
-    live_registry().link_prompt(prompt, {});
-    held = std::move(prompt);
+        for (std::uint64_t i = 0; i < key.unit_count; ++i) {
+            const std::uint8_t* p = map_record(key, screen, i);
+            if (map_field<std::uint64_t>(p, key.class_id) != class_id) continue;
+            held = *map_field<std::set<std::string>>(p, key.prompt_ids).begin();
+            break;
+        }
+    }).detach();
     return true;
 }
 
@@ -153,7 +141,7 @@ void ContextMatcher_Evaluate(const AttentionStep& step) {
         (void)wellness_check_context_matcher_step_well_formed;
     }
 
-    if (step.last) {
+    if (step.stop_token) {
         live_registry().link_prompt(held, noted);
         const bool wellness_check_context_matcher_pools_posted = live_registry().linked_pools(held) == noted;
         (void)wellness_check_context_matcher_pools_posted;
