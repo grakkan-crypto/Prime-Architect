@@ -31,6 +31,22 @@ void          os_screen_show(std::uint64_t unit, const Pool* content);
 // begun before the switch can still be on it.
 void          os_retire(const Pool* retired);
 
+// BUILD OUTLINE — TO BE REMOVED ONCE THE RAM MANAGER IS BUILT. The RAM
+// Manager hands over one continuous block of `bytes`, or null when it cannot.
+std::uint8_t* ram_manager_claim_continuous(std::uint64_t bytes);
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+void PoolMaintenance::boot() {
+    constexpr std::uint64_t kBootClaim = 80ull << 30;
+    std::lock_guard<std::mutex> lock(mutex_);
+    block_       = ram_manager_claim_continuous(kBootClaim);
+    block_bytes_ = block_ != nullptr ? kBootClaim : 0;
+    const bool wellness_check_pool_memory_claimed = block_ != nullptr;
+    (void)wellness_check_pool_memory_claimed;
+}
+
 // ---------------------------------------------------------------------------
 // Arrive / leave — a pool's bytes
 // ---------------------------------------------------------------------------

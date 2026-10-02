@@ -149,6 +149,11 @@
 //   pool alone, undoes nothing already standing, and stops nothing else a
 //   caller is minting.
 //
+// BOOT
+//   One act: the claim of one continuous block of 80 GiB from the RAM
+//   Manager. The map is an element of that block. Whether the claim stands
+//   is posted to Wellness.
+//
 // THE MAP AND ITS READS
 //   The map is held here, and appears on the screen, on LiveRegistry: the
 //   same memory, not a copy. Every read of the map is on the screen. No
@@ -157,6 +162,10 @@
 //
 //   READ, every access, per unit: the content is read where it appears on
 //   the screen. Nothing is asked of this file, told to it, or counted by it.
+//
+//   NO POOLS, NO MAP. The map is the pools. With no pool standing the screen
+//   shows nothing, and that is correct: it is not a failure, not an empty
+//   state to repair, and nothing is placed there to fill it.
 //
 //   EDIT, per unit touched, one edit at a time:
 //     BUILD. The complete new content is written into memory of its own. The
@@ -305,6 +314,12 @@ public:
     // session, before its first visit to the screen.
     MapKey   map_key() const;
 
+    // ---- boot ----------------------------------------------------------------
+    // The one boot act: one continuous block of 80 GiB claimed from the RAM
+    // Manager. Nothing is returned; whether the block stands is posted to
+    // Wellness.
+    void boot();
+
     PoolRead arrive(MapUnit* unit);
     void     leave(const PoolRead& read, bool died = false);
 
@@ -379,6 +394,10 @@ private:
     // The pool leaves the map; its chunks go back. Its gate
     // is closed and empty. Caller holds the lock. Used by destroy and leave.
     void end_pool_locked(PoolMap& map, MapUnit& u);
+
+    // The block claimed at boot. Wholly this file's. Null: no block.
+    std::uint8_t* block_       = nullptr;
+    std::uint64_t block_bytes_ = 0;
 
     // The map. Held here alone.
     PoolMap map_;
