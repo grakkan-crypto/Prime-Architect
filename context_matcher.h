@@ -10,7 +10,9 @@
 //
 //   It is told by Watcher when an input pool appears, takes that pool's
 //   prompt ID from the pool map, and evaluates each generation step's
-//   attention against it.
+//   attention against it. The step that produced the end token is not
+//   evaluated: on it, the prompt ID's pools are posted to LiveRegistry and
+//   everything held for that prompt ID is cleared.
 //
 // ===========================================================================
 // OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
@@ -56,11 +58,13 @@ struct PoolAttention {
     float         weight = 0.0f;
 };
 
-// One generated token's Class 1 attention: its total to Class 1, and its
-// attention to each Class 1 pool.
+// One generated token's Class 1 attention: its total to Class 1, its
+// attention to each Class 1 pool, and whether this step produced the end
+// token.
 struct AttentionStep {
     float                      class_total = 0.0f;
     std::vector<PoolAttention> pools;
+    bool                       last        = false;
 };
 
 // Registers one Watcher request per input pool the registry knows.

@@ -13,18 +13,7 @@ This is an AI server, all-in-one system, not an application running on an OS. Su
 
 ## Rules sections in headers
 
-Every header that is edited must carry a rules section. If it has none, one is written as part of the edit.
-
-All headers must contain rules for when the system is self-sustaining and the internal AI is looking inward. For NOW, while Claude is working with the user, those rules are structural guidelines to Claude and goalposts CAN be moved, but ONLY with consultation with the user. That phasing is an instruction to Claude and lives here, never in the headers: headers state their rules to the internal AI as strict, so nothing has to be rewritten when the phase ends.
-
-Preamble, identical in every header:
-
-    OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by definition. It is raised with the user, never made.
-
-Format:
-- Numbered. Each rule is one capitalised statement of the invariant, followed by only as much explanation as is needed to apply it and to recognise a violation.
-- Rules are structural guidelines for an AI maintaining the file: what the file is and is not responsible for, what it owns and must not own, who may write its data and who may read it, what must never be added to it, and the boundaries it must not cross.
-- Rules are NOT a list of the file's functions and NOT a description of how its code works. The code states what the code does; a rule states what must stay true whatever the code becomes.
+Every file must have rules in its header. How to build them is set out in `header_rules_guidelines.md`; check it before writing or editing any header's rules.
 
 ## No in-progress language in headers
 

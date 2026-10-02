@@ -159,6 +159,14 @@ bool ContextMatcher_Receive(const std::string&, const std::string& message) {
 void ContextMatcher_Evaluate(const AttentionStep& step) {
     if (evaluating != held) { evaluating = held; tracks.clear(); noted.clear(); }
     if (evaluating.empty()) return;
+    if (step.last) {
+        live_registry().link_prompt(evaluating, std::move(noted));
+        held.clear();
+        evaluating.clear();
+        tracks.clear();
+        noted.clear();
+        return;
+    }
 
     std::uint64_t all = 0;
     for (const PoolAttention& p : step.pools) all += p.tokens;
