@@ -1,7 +1,7 @@
 #include "watcher.h"
 
 #include "live_registry.h"
-#include "pool_maintenance.h"   // [[COW-EDIT 35]]
+#include "pool_maintenance.h"
 #include "text_file.h"
 
 #include <algorithm>
@@ -366,8 +366,6 @@ void Watcher::run() {
         std::vector<PoolRecord> map;
         PoolView                view;
         if (read_map || read_content) {
-            // [[COW-EDIT 31]]
-            // [[COW-EDIT 75]]
             if (!has_map_key_) {
                 map_key_     = pool_maintenance().map_key();
                 has_map_key_ = true;
@@ -407,7 +405,6 @@ void Watcher::run() {
         }
         if (read_content) {
             content_now_.clear();
-            // [[COW-EDIT 33]]
             for (const PoolRecord& p : map) {
                 if (forbidden_.count(p.id)) continue;
                 content_now_.emplace(p.id, WatcherItem{ pool_content(p), p });

@@ -1,7 +1,7 @@
 // pool_maintenance.cpp — the pool: minted, grown, reclassified, flagged and
 // destroyed here, nowhere else. Every action builds the new content of the
 // map units it touches apart and switches the screen to show it. Every read
-// of a pool's bytes is granted here. [[COW-EDIT 18]]
+// of a pool's bytes is granted here.
 
 #include "pool_maintenance.h"
 
@@ -9,16 +9,13 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstddef>    // [[COW-EDIT 70]] offsetof
+#include <cstddef>    // offsetof
 
 namespace prime {
 
 // ---------------------------------------------------------------------------
 // OS_OWES — declared here exactly as they are called; the OS defines them.
 // ---------------------------------------------------------------------------
-
-// [[COW-EDIT 20]] The OS calls for the map are removed; Pool Maintenance
-// edits it directly.
 
 // Chunks: one unit of pool memory, at the one uniform size. Null when there
 // is none to give.
@@ -35,7 +32,7 @@ void          os_screen_show(std::uint64_t unit, const Pool* content);
 void          os_retire(const Pool* retired);
 
 // ---------------------------------------------------------------------------
-// [[COW-EDIT 21]] Arrive / leave — a pool's bytes
+// Arrive / leave — a pool's bytes
 // ---------------------------------------------------------------------------
 PoolRead PoolMaintenance::arrive(MapUnit* unit) {
     Gate& g = unit->gate;
@@ -64,7 +61,7 @@ void PoolMaintenance::leave(const PoolRead& read, bool died) {
 }
 
 // ---------------------------------------------------------------------------
-// [[COW-EDIT 22]] The one edit, per unit — built apart, then switched
+// The one edit, per unit — built apart, then switched
 // ---------------------------------------------------------------------------
 void PoolMaintenance::write_unit_locked(PoolMap& map, MapUnit& u, Pool next, bool present) {
     const Pool* built = present ? new Pool(std::move(next)) : nullptr;   // built complete, apart
@@ -92,7 +89,7 @@ void PoolMaintenance::end_pool_locked(PoolMap& map, MapUnit& u) {
 }
 
 // ---------------------------------------------------------------------------
-// [[COW-EDIT 71]] The map key — this file's layout, stated as positions
+// The map key — this file's layout, stated as positions
 // ---------------------------------------------------------------------------
 MapKey PoolMaintenance::map_key() const {
     MapKey k;
@@ -141,7 +138,7 @@ void PoolMaintenance::create(const ClassRef&    cls,
                 std::chrono::system_clock::now().time_since_epoch()).count());
 
         std::lock_guard<std::mutex> lock(mutex_);
-        PoolMap& map = map_;   // [[COW-EDIT 24]]
+        PoolMap& map = map_;
 
         // The id chain: prompt id(s) come off the one pool this continues,
         // read off the live map. A continuation naming a pool that is not
@@ -153,7 +150,7 @@ void PoolMaintenance::create(const ClassRef&    cls,
             else p.prompt_ids = from->live->prompt_ids;
         }
 
-        // [[COW-EDIT 25]] A free unit: no pool on it.
+        // A free unit: no pool on it.
         MapUnit* free_unit = nullptr;
         if (chain_ok)
             for (std::uint64_t i = 0; i < map.unit_count && free_unit == nullptr; ++i)
@@ -185,7 +182,7 @@ void PoolMaintenance::create(const ClassRef&    cls,
 // ---------------------------------------------------------------------------
 bool PoolMaintenance::grow(const std::string& pool_id) {
     std::lock_guard<std::mutex> lock(mutex_);
-    PoolMap& map = map_;   // [[COW-EDIT 26]]
+    PoolMap& map = map_;
     MapUnit* u = live_unit(map, pool_id);
     if (u == nullptr) return false;
     Pool next = *u->live;
@@ -223,7 +220,7 @@ bool PoolMaintenance::matches(const Pool& p, const PoolFilter& f) {
 
 // ---------------------------------------------------------------------------
 // Destroy / flag / unflag
-// [[COW-EDIT 27]] All three: per unit, built apart, then switched.
+// All three: per unit, built apart, then switched.
 // Destroy flags for destruction and closes the gate; the pool ends at its
 // last leave, or now if it has no reader.
 // ---------------------------------------------------------------------------
@@ -302,7 +299,7 @@ PoolMaintenance::reclassify(const std::string& pool_id, const ClassRef& cls) {
     if (class_id == 0) return Reclassify::NotFound;
 
     std::lock_guard<std::mutex> lock(mutex_);
-    PoolMap& map = map_;   // [[COW-EDIT 28]]
+    PoolMap& map = map_;
     MapUnit* u = live_unit(map, pool_id);
     if (u == nullptr) return Reclassify::NotFound;
     Pool next = *u->live;

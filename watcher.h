@@ -36,11 +36,9 @@
 // 12. WATCHER REPORTS CHANGE, NEVER A STANDING STATE.
 // ===========================================================================
 
-// [[COW-EDIT 72]]
-
 #pragma once
 
-#include "pool_maintenance.h"   // [[COW-EDIT 73]]
+#include "pool_maintenance.h"
 
 #include <atomic>
 #include <cstdint>
@@ -206,7 +204,6 @@ private:
 
     std::set<std::string>           forbidden_;
 
-    // [[COW-EDIT 74]]
     MapKey                          map_key_;
     bool                            has_map_key_ = false;
 };

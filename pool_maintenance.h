@@ -2,17 +2,7 @@
 // existence here and goes out of existence here. Nowhere else. It lives on
 // the pool map, which this file holds.
 //
-// ###########################################################################
-// [[COW-EDIT]] — EVERY CHANGE FOR THE COPY-ON-WRITE MAP IS MARKED
-// [[COW-EDIT n]] IN THIS FILE, pool_maintenance.cpp, live_registry.h AND
-// watcher.cpp. Search "[[COW-EDIT" to find them all. The markers are review
-// notes and are stripped once reviewed; they are not part of the header.
-// ###########################################################################
-//
 // ===========================================================================
-// [[COW-EDIT 1]] Preamble replaced with the standard one. Rules 8 and 11
-// rewritten for copy-on-write; rules 12 and 13 added.
-//
 // OFFICIAL RULINGS — STRICT RULES. A change that would break one is wrong by
 // definition. It is raised with the user, never made.
 //
@@ -74,7 +64,7 @@
 //    hardcoded here in its place.
 //
 // 11. EVERY EDIT IS BUILT APART, THEN SWITCHED, PER UNIT, AND NEVER WAITS.
-//    [[COW-EDIT 37]] An edit touches only the units it changes. A unit's new
+//    An edit touches only the units it changes. A unit's new
 //    content is built complete in memory of its own; the live content and
 //    the screen are not touched while it is built. The screen is then
 //    switched to show it, in one step. Content is never written once it can
@@ -97,7 +87,7 @@
 //    leaves, the pool leaves the map and its chunks are released. Nothing
 //    else pre-empts or brings forward a destruction.
 //
-// 14. THE MAP IS FIXED-SIZE UNITS. [[COW-EDIT 38]]
+// 14. THE MAP IS FIXED-SIZE UNITS.
 //    The map is the set of pools: a pool's unit holding it and the pool
 //    existing are the same fact. No second store, no log, no derivation.
 //    Ownership runs strictly downward: map, unit, chunk list, bytes. The map
@@ -133,8 +123,7 @@
 //   pool alone, undoes nothing already standing, and stops nothing else a
 //   caller is minting.
 //
-// [[COW-EDIT 2]] THE MAP AND ITS READS (new section) — rewritten to the
-// copy-on-write spec [[COW-EDIT 39]]
+// THE MAP AND ITS READS
 //   The map is held here, and appears on the screen, on LiveRegistry: the
 //   same memory, not a copy. Every read of the map is on the screen. No
 //   other path to the map exists. The map cannot be taken anywhere, only
@@ -153,7 +142,7 @@
 //
 //   THE KEY. Before its first visit of the session, a reader asks this
 //   file for the map key and keeps it. It reads the screen only through the
-//   key. [[COW-EDIT 69]]
+//   key.
 //
 //   A pool's bytes are gated: a reader arrives on the pool, is a current
 //   reader until it leaves, and a pool flagged for destruction admits no
@@ -167,17 +156,16 @@
 // OS_OWES
 //   The marker word (live_registry.h). The OS supplies the chunks and
 //   releases retired content; each is declared where it is called.
-//   [[COW-EDIT 3]]
 
 #pragma once
 
 #include "live_registry.h"
 
-#include <atomic>     // [[COW-EDIT 4]]
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <optional>
-#include <set>        // [[COW-EDIT 4]]
+#include <set>
 #include <string>
 #include <variant>
 #include <vector>
@@ -202,8 +190,7 @@ struct PoolFilter {
 };
 
 // ===========================================================================
-// [[COW-EDIT 5]] THE POOL MAP — LAYOUT (new). Previously referenced as
-// Pool / PoolMap / PoolMapImage but defined nowhere; defined here.
+// THE POOL MAP — LAYOUT
 // ===========================================================================
 
 // One pool: the whole of one unit's content. No generation marker.
@@ -216,7 +203,7 @@ struct Pool {
     std::vector<std::uint8_t*> chunks;
     std::uint64_t              byte_capacity = 0;
     std::vector<std::string>   immune_from;
-    bool                       flagged_for_destruction = false;   // [[COW-EDIT 6]]
+    bool                       flagged_for_destruction = false;
 };
 
 // Where a pool's bytes are read. Every unit has one. `holders` is every
@@ -227,15 +214,14 @@ struct Gate {
     bool                         closed = false;
 };
 
-// [[COW-EDIT 41]] One unit: one pool position, fixed size. `live` is its
+// One unit: one pool position, fixed size. `live` is its
 // content, the content the screen shows for it. Null: no pool.
 struct MapUnit {
     const Pool* live = nullptr;
     Gate        gate;
 };
 
-// [[COW-EDIT 7 | PROVISIONAL — unit granularity, spec default: one unit =
-// one pool record + its chunk list]]. Held by Pool Maintenance alone.
+// Held by Pool Maintenance alone.
 struct PoolMap {
     MapUnit*      units      = nullptr;
     std::uint64_t unit_count = 0;
@@ -249,7 +235,7 @@ struct PoolRead {
     bool          granted = false;
 };
 
-// [[COW-EDIT 64]] THE MAP KEY — how to read the screen. Handed out by Pool
+// THE MAP KEY — how to read the screen. Handed out by Pool
 // Maintenance; a map reader asks for it once, before its first visit of the
 // session, and keeps it. Every position is a byte offset. A reader reads the
 // map only through the key, never through the layout above, so a change to
@@ -262,13 +248,13 @@ struct MapKey {
                   byte_capacity = 0, flagged_for_destruction = 0;
 };
 
-// [[COW-EDIT 65]] One field, at the key's offset, as the type the key names it.
+// One field, at the key's offset, as the type the key names it.
 template <class T>
 inline const T& map_field(const std::uint8_t* at, std::uint64_t offset) {
     return *reinterpret_cast<const T*>(at + offset);
 }
 
-// [[COW-EDIT 67]] One access to one unit: the pool record where it appears
+// One access to one unit: the pool record where it appears
 // on the screen, found through the key.
 inline const std::uint8_t* map_record(const MapKey& k, const void* screen, std::uint64_t unit) {
     return static_cast<const std::uint8_t*>(screen) + unit * k.unit_size;
@@ -284,12 +270,12 @@ public:
     PoolMaintenance(const PoolMaintenance&)            = delete;
     PoolMaintenance& operator=(const PoolMaintenance&) = delete;
 
-    // ---- [[COW-EDIT 8]] arrive / leave — a pool's bytes -------------------
+    // ---- arrive / leave — a pool's bytes ---------------------------------
     // Arrive on one unit's pool. Refused — not granted — when that pool is
     // flagged for destruction or gone. Leave ends the read, and the last
     // leave from a flagged pool destroys it. `died`: the system leaving for
-    // a reader that ended without leaving. [[COW-EDIT 43]]
-    // [[COW-EDIT 68]] The map key, whole. Asked for once per reader per
+    // a reader that ended without leaving.
+    // The map key, whole. Asked for once per reader per
     // session, before its first visit to the screen.
     MapKey   map_key() const;
 
@@ -315,7 +301,7 @@ public:
     // Refused — no pool left standing — when the class resolves to nothing,
     // continues_from names a pool that does not exist or is flagged for
     // destruction, the first chunk cannot be taken, or the map has no free
-    // unit. [[COW-EDIT 9]]
+    // unit.
     void create(const ClassRef&    cls,
                 const std::string& turn_id,
                 const std::string& continues_from = std::string(),
@@ -323,11 +309,11 @@ public:
 
     // ---- grow ---------------------------------------------------------------
     // One more chunk. False when the pool does not exist, is flagged for
-    // destruction, or the OS has no chunk to give. [[COW-EDIT 10]]
+    // destruction, or the OS has no chunk to give.
     bool grow(const std::string& pool_id);
 
     // ---- destroy / flag / unflag — one filter, one source ----------------
-    // Each returns how many pools it acted on. [[COW-EDIT 11]] Destroy flags
+    // Each returns how many pools it acted on. Destroy flags
     // for destruction and closes the pool's gate; the pool leaves the map
     // when its last reader leaves, at once if it has none. A pool already
     // flagged for destruction is not acted on again, by any of the three.
@@ -336,7 +322,7 @@ public:
     std::uint64_t unflag (const PoolFilter& filter, const std::string& source);
 
     // ---- reclassify --------------------------------------------------------
-    enum class Reclassify { Done, NotFound };   // [[COW-EDIT 12]]
+    enum class Reclassify { Done, NotFound };
 
     // The new class, as the caller has it. Changes Class ID on the entry and
     // nothing else. NotFound when the pool does not exist, is flagged for
@@ -355,16 +341,16 @@ private:
     // One chunk from the OS onto the end of the pool. Caller holds the lock.
     bool take_chunk_locked(Pool& p);
 
-    // [[COW-EDIT 13]] The one edit, per unit: the new content built apart,
+    // The one edit, per unit: the new content built apart,
     // the screen switched to show it, the content replaced retired. Caller
     // holds the lock.
     void write_unit_locked(PoolMap& map, MapUnit& u, Pool next, bool present);
 
-    // [[COW-EDIT 14]] The unit holding this pool, live and not flagged for
+    // The unit holding this pool, live and not flagged for
     // destruction; null if none. Used by create, grow, reclassify.
     static MapUnit* live_unit(PoolMap& map, const std::string& pool_id);
 
-    // [[COW-EDIT 15]] The pool leaves the map; its chunks go back. Its gate
+    // The pool leaves the map; its chunks go back. Its gate
     // is closed and empty. Caller holds the lock. Used by destroy and leave.
     void end_pool_locked(PoolMap& map, MapUnit& u);
 
@@ -376,7 +362,7 @@ private:
     mutable std::mutex mutex_;
 };
 
-// [[COW-EDIT 17]] The one instance (was declared only inside rules.cpp).
+// The one instance.
 PoolMaintenance& pool_maintenance();
 
 } // namespace prime
