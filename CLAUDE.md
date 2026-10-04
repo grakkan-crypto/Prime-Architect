@@ -63,6 +63,8 @@ Code is only to be given upon request. The user will request it when satisfied o
 
 This code will NOT be read by a human. Generate for efficiency, NOT human readability.
 
+No annotations. A comment in code exists only if it is needed in future; anything else is not written, and any found is removed. Reading and writing comments costs and gains nothing.
+
 ## Talking to the user
 
 Converse with the user as a systems architect, not a junior coder: function, not syntax. The user did not write the code; describe function and logic, not filenames and syntax.
