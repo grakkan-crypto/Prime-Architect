@@ -100,27 +100,16 @@ std::vector<Stretch> PoolMaintenance::give_back(std::uint64_t bytes) {
     std::lock_guard<std::mutex> lock(mutex_);
     const bool wellness_check_pool_memory_given = true;
     (void)wellness_check_pool_memory_given;
+    std::uint64_t n = std::min(bytes, held_bytes_ > used_bytes_ ? held_bytes_ - used_bytes_ : 0);
     std::vector<Stretch> out;
-    std::uint64_t n = bytes;
-    // Received stretches, most recent first, each only while no pool is on it.
-    for (std::size_t i = held_.size(); n != 0 && i-- > 1;) {
-        std::uint8_t** link = &free_section_;
-        while (*link != nullptr && *link != held_[i].at)
-            link = reinterpret_cast<std::uint8_t**>(*link);
-        if (*link == nullptr) continue;
-        *link = *reinterpret_cast<std::uint8_t**>(held_[i].at);
-        out.push_back(held_[i]);
-        held_bytes_ -= held_[i].bytes;
-        n            = n > held_[i].bytes ? n - held_[i].bytes : 0;
-        held_.erase(held_.begin() + static_cast<std::ptrdiff_t>(i));
-    }
-    // Then the boot block, from its end, never past what pools have taken.
-    const std::uint64_t k = std::min<std::uint64_t>(n, static_cast<std::uint64_t>(vram_end_ - vram_next_));
-    if (k != 0) {
-        vram_end_       -= k;
-        held_[0].bytes  -= k;
-        held_bytes_     -= k;
-        out.push_back({ vram_end_, k });
+    while (n != 0 && !held_.empty()) {
+        Stretch& s = held_.back();
+        const std::uint64_t k = std::min(n, s.bytes);
+        s.bytes -= k;
+        out.push_back({ s.at + s.bytes, k });
+        held_bytes_ -= k;
+        n           -= k;
+        if (s.bytes == 0) held_.pop_back();
     }
     return out;
 }
@@ -211,12 +200,9 @@ MapUnit* PoolMaintenance::live_unit(const std::string& pool_id) {
 void PoolMaintenance::end_pool_locked(MapUnit& u) {
     if (!u.present || !u.record.flagged_for_destruction) return;
     const std::vector<std::uint8_t*> chunks = u.record.chunks;
-    std::uint8_t* const section = u.record.section;
     if (!write_unit_locked(u, Pool{}, false)) return;           // the edit: the entry gone
     for (std::uint8_t* c : chunks) os_chunk_return(c);          // OS_OWES
-    *reinterpret_cast<std::uint8_t**>(section) = free_section_; // its 1 MiB, free again
-    free_section_ = section;
-    const std::uint64_t freed = kPoolBytes + chunks.size() * os_chunk_size();   // OS_OWES
+    const std::uint64_t freed = chunks.size() * os_chunk_size();   // OS_OWES
     used_bytes_ = used_bytes_ > freed ? used_bytes_ - freed : 0;
 }
 
@@ -298,25 +284,12 @@ void PoolMaintenance::create(const ClassRef&    cls,
         const bool wellness_check_pool_map_full = chain_ok && free_unit == nullptr;
         (void)wellness_check_pool_map_full;
 
-        // The pool's own 1 MiB of the VRAM part, before the edit: a freed
-        // one, else the next. None left: the 1 MiB is asked for from the RAM
-        // Manager, and the spawn goes ahead.
-        if (free_unit != nullptr) {
-            if (free_section_ != nullptr) {
-                p.section     = free_section_;
-                free_section_ = *reinterpret_cast<std::uint8_t**>(free_section_);
-            } else if (static_cast<std::uint64_t>(vram_end_ - vram_next_) >= kPoolBytes) {
-                p.section   = vram_next_;
-                vram_next_ += kPoolBytes;
-            } else {
-                const bool wellness_check_pool_memory_low = true;
-                (void)wellness_check_pool_memory_low;
-                p.section = ram_manager_supply(kPoolBytes, false);
-                const bool wellness_check_pool_memory_supplied = p.section != nullptr;
-                (void)wellness_check_pool_memory_supplied;
-                if (p.section != nullptr) { held_.push_back({ p.section, kPoolBytes }); held_bytes_ += kPoolBytes; }
-            }
-            if (p.section != nullptr) { p.byte_capacity = kPoolBytes; used_bytes_ += kPoolBytes; }
+        // The pool's own 1 MiB of the VRAM part, before the edit.
+        if (free_unit != nullptr && static_cast<std::uint64_t>(vram_end_ - vram_next_) >= kPoolBytes) {
+            p.section       = vram_next_;
+            p.byte_capacity = kPoolBytes;
+            vram_next_     += kPoolBytes;
+            used_bytes_    += kPoolBytes;
         }
         if (free_unit != nullptr && p.section != nullptr) {
             const std::string id = p.pool_id;
@@ -369,7 +342,7 @@ bool PoolMaintenance::take_chunk_locked(Pool& p) {
 
     if (c == nullptr) return false;
     p.chunks.push_back(c);
-    p.byte_capacity = kPoolBytes + p.chunks.size() * cs;
+    p.byte_capacity = p.chunks.size() * cs;
     used_bytes_ += cs;
     return true;
 }

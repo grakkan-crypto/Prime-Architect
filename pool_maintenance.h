@@ -45,18 +45,14 @@
 //   the ONE pool this one continues — read directly off that pool's entry.
 //
 // SIZING
-//   A pool is bytes. Mint takes 1 MiB of the VRAM part: a freed one, else the
-//   next; none left, the 1 MiB is asked for from the RAM Manager and the
-//   spawn goes ahead. Every grow takes one more chunk. Whatever is writing
-//   decides WHEN to grow, by reading capacity off the entry and calling grow.
-//   This file never watches for that.
+//   A pool is bytes. Mint takes 1 MiB of the VRAM part. Every grow takes one
+//   more chunk. Whatever is writing decides WHEN to
+//   grow, by reading capacity off the entry and calling grow. This file
+//   never watches for that.
 //
 // THE BARRIER
 //   Every pool has a barrier, and the same barrier stands around every KV
-//   section that represents it. Entry is allowed and every reader is known.
-//   A pool flagged for destruction admits no new reader to it or its KV
-//   sections; when the last reader leaves, the pool and its KV sections are
-//   destroyed together.
+//   section that represents it.
 //
 // CREATE AND ITS CALLER
 //   The caller fires and moves on. Create hands nothing back to it — the
@@ -193,6 +189,16 @@ struct Preserved {
     std::uint64_t readers   = 0;
     bool          lifted    = false;
     Preserved*    next_free = nullptr;
+};
+
+struct MapUnit;
+
+// One KV section representing a pool. Its barrier is that pool's barrier:
+// entry is arrive and leave on `pool`.
+struct KVSection {
+    MapUnit*      pool   = nullptr;
+    std::uint8_t* bytes  = nullptr;
+    std::uint64_t length = 0;
 };
 
 // One section: one pool's entry, in place in the RAM part. `present` false:
@@ -386,8 +392,8 @@ private:
     std::vector<Stretch> held_;
     std::uint64_t        held_bytes_ = 0, used_bytes_ = 0;
     // The boot block's VRAM part: taken up to `vram_next_`, held up to
-    // `vram_end_`. Freed 1 MiB sections, linked through their own first bytes.
-    std::uint8_t*        vram_next_ = nullptr, *vram_end_ = nullptr, *free_section_ = nullptr;
+    // `vram_end_`.
+    std::uint8_t*        vram_next_ = nullptr, *vram_end_ = nullptr;
 
     // The map. Held here alone.
     PoolMap map_;
