@@ -44,8 +44,10 @@
 // 7. LIVEREGISTRY STORES FACTS ABOUT THE SYSTEM.
 //    If the answer is not clear, it is not a fact, and it does not live here.
 //
-// 8. THE SCREEN IS POOL MAINTENANCE'S MEMORY, DISPLAYED.
-//    LiveRegistry never writes to it, copies it, or interprets it.
+// 8. THE SCREEN IS POOL MAINTENANCE'S BYTES, REFLECTING THE MAP'S OWN BYTES.
+//    The same bytes as the map, shown here, read-only: not a copy, and not
+//    the map's location. Pool Maintenance alone writes it. LiveRegistry
+//    never writes to it, copies it, or interprets it.
 // ===========================================================================
 
 #pragma once
@@ -284,6 +286,7 @@ public:
     void unlink_prompt(const std::string& prompt_id);
 
     // ---- the screen ---------------------------------------------------------
+    // Pool Maintenance's bytes, reflecting the map's own bytes. Read-only.
     const void* screen = nullptr;
 
 private:
