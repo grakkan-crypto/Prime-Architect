@@ -32,27 +32,17 @@
 
 namespace prime::frontend {
 
-// One carried context entry. id is stable for the entry's lifetime so the
-// Architect can target it by handle across audits.
 struct ResidentEntry {
     std::string id;
     std::string text;
 };
 
-// The cross-turn carrier. Mutated by the Architect bridge (add/prune/replace);
-// read wherever the current turn's shared context is assembled. Plain custody —
-// this struct holds and hands back, it does not decide what belongs.
 class ResidentContext {
 public:
     ResidentContext() = default;
 
-    // Replace the whole set — the Architect's audit result for a turn. This is
-    // the common path: the Architect re-derives the relevant set each ingestion
-    // and hands back the pruned result wholesale.
     void set(std::vector<ResidentEntry> entries) { entries_ = std::move(entries); }
 
-    // Targeted mutation by handle, for incremental adjustment when a full
-    // re-derive is not warranted.
     void upsert(const std::string& id, const std::string& text);
     bool remove(const std::string& id);
 
@@ -66,4 +56,4 @@ private:
     std::vector<ResidentEntry> entries_;
 };
 
-} // namespace prime::frontend
+}

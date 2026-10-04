@@ -26,7 +26,4 @@
 
 namespace prime::frontend {
 
-// (No out-of-line definitions required at present. Accessors are inline in the
-// header; state pieces define their own behaviour in their own units.)
-
-} // namespace prime::frontend
+}

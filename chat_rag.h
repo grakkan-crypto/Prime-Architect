@@ -103,7 +103,7 @@ namespace prime::rag {
 
 class RagPersistence;
 
-inline constexpr uint16_t kLive = 0xFFFF; // absence of a lifecycle marker
+inline constexpr uint16_t kLive = 0xFFFF;
 
 enum class Voice : uint8_t { User = 1, System = 2 };
 
@@ -111,16 +111,12 @@ enum class Tense   : uint8_t { Past = 0, Present = 1, Future = 2 };
 enum class Subject : uint8_t { Me = 0, You = 1, Them = 2 };
 
 struct TagRef {
-    uint16_t concept_id = 0;                 // registry address
-    uint8_t  polarity   = 1;                 // 1 positive, 0 negative
+    uint16_t concept_id = 0;
+    uint8_t  polarity   = 1;
     Tense    tense      = Tense::Present;
     Subject  subject    = Subject::Me;
 };
 
-// A voice label over a user-facing stretch of the turn. Mechanical
-// provenance from the pool it reflected from. Optional embedding
-// (Archivist-supplied) makes the stretch content-searchable through the
-// voice gate — the second eligibility route into fuzzy search.
 struct VoiceSpan {
     Voice    voice = Voice::User;
     uint32_t begin = 0;
@@ -128,19 +124,13 @@ struct VoiceSpan {
     std::vector<float> embedding;
 };
 
-// A tag laid over a stretch of the turn. THE SPAN IS THE CONTEXT BOUNDARY:
-// [begin, end) byte offsets into the turn's content, drawn exactly as wide
-// as the complete context for this tag — no wider, no narrower.
 struct TagSpan {
     TagRef   tag;
     uint32_t begin = 0;
     uint32_t end   = 0;
-    std::vector<float> embedding; // optional, span-level, Archivist-supplied
+    std::vector<float> embedding;
 };
 
-// The coordinate riding with content — extracted once at generation, stored
-// settled. absent==true for material that never carried one; honest absence,
-// never zero-filled to look like calm neutrality.
 struct InflectionRecord {
     bool    absent = true;
     uint8_t confidence = 0;
@@ -148,12 +138,12 @@ struct InflectionRecord {
 };
 
 struct RagEntry {
-    uint64_t         entry_id = 0;    // sequential, assigned by the store
+    uint64_t         entry_id = 0;
     uint64_t         turn_id  = 0;
-    std::string      thread_id;       // subject thread — the cascade target
-    std::string      content;         // THE WHOLE TURN, verbatim, end to end
-    std::vector<TagSpan> spans;       // empty == invisible to GATE 1
-    std::vector<VoiceSpan> voices;    // user-facing stretches; GATE 2 material
+    std::string      thread_id;
+    std::string      content;
+    std::vector<TagSpan> spans;
+    std::vector<VoiceSpan> voices;
     InflectionRecord inflection;
     uint16_t         lifecycle = kLive;
     std::string      lifecycle_reason;
@@ -173,49 +163,30 @@ struct ExpiryRecord {
     bool        fired = false;
 };
 
-// One exact fetch result: a span and the turn it lives in. text() is the
-// precise covered stretch — the complete context, nothing else.
 struct SpanHit {
     const RagEntry* entry = nullptr;
     const TagSpan*  span  = nullptr;
-    float distance = 0.0f; // meaningful for fuzzy results only
+    float distance = 0.0f;
     std::string text() const {
         return entry->content.substr(span->begin, span->end - span->begin);
     }
 };
 
-// One voice-gate result: a labelled stretch and the turn it lives in.
 struct VoiceHit {
     const RagEntry*  entry = nullptr;
     const VoiceSpan* span  = nullptr;
-    float distance = 0.0f; // meaningful for fuzzy results only
+    float distance = 0.0f;
     std::string text() const {
         return entry->content.substr(span->begin, span->end - span->begin);
     }
 };
 
-// The three query behaviours in one declared shape. all_of empty AND any_of
-// empty is a refused query — "fetch everything" is not a thing.
 struct TagQuery {
-    std::vector<uint16_t> all_of;   // turn must carry EVERY one (default use)
-    std::vector<uint16_t> any_of;   // turn must carry AT LEAST one (vague cast)
-    std::vector<uint16_t> none_of;  // spans overlapping these are dropped
-    std::optional<Voice> voice;     // NARROWING ONLY, PERMANENTLY: decides
-                                    // WHICH tag spans qualify (must overlap a
-                                    // voice span of this voice); NEVER widens
-                                    // WHAT text comes back. A returned hit is
-                                    // always exactly the tag span's own
-                                    // boundaries — never the voice span's,
-                                    // however much wider that voice span is.
-                                    // The label is annotation for filtering,
-                                    // not an extraction boundary. Widening it
-                                    // to "the whole quote for context" would
-                                    // reopen exactly the noise this design
-                                    // exists to keep out (jokes, chatter
-                                    // riding the same voice stretch as a real
-                                    // decision). Voice alone finds nothing
-                                    // through this gate — see GATE 2 for that.
-    // Optional frame narrowing applied to matched (returned) spans:
+    std::vector<uint16_t> all_of;
+    std::vector<uint16_t> any_of;
+    std::vector<uint16_t> none_of;
+    std::optional<Voice> voice;
+
     std::optional<uint8_t> polarity;
     std::optional<Tense>   tense;
     std::optional<Subject> subject;
@@ -228,33 +199,19 @@ public:
     bool open(RagPersistence& persistence, std::string& reason_out);
     bool has_persistence() const { return persistence_ != nullptr; }
 
-    // THE ONE WRITE. The whole turn plus its tag spans and voice labels, in
-    // one act. Refuses: span/label offsets outside the content, inverted or
-    // mutually overlapping voice labels (speakers alternate; overlap is a
-    // caller bug), embedding dimension mismatch. (Tag-id validation against
-    // the registry is Access's job at the door.) Turns with no tag spans
-    // are legal and expected — invisible to GATE 1, still voice-findable.
     std::optional<uint64_t> append(RagEntry entry, std::string& reason_out);
 
-    // ---- EXACT SEARCH — the tag filter system ----
-    // Returns the requested tags' spans from turns satisfying the query.
-    // Refuses (empty + reason) an empty query.
     std::vector<SpanHit> find(const TagQuery& q, std::string& reason_out) const;
 
-    // ---- FUZZY SEARCH over spans (Phase 1 exact scan; ANN SLOT inside) ----
     std::vector<SpanHit> nearest(const std::vector<float>& query,
                                  std::optional<float> max_distance,
                                  const std::vector<uint16_t>& none_of,
                                  std::string& reason_out) const;
 
-    // ---- GATE 2: THE DELIBERATE VOICE SEARCH ----
-    // Listing by voice, optionally time-bounded (time is optional — sometimes
-    // time IS the question, sometimes there is no window at all). Chronological.
     std::vector<VoiceHit> voice_find(Voice v,
                                      std::optional<int64_t> from_ts,
                                      std::optional<int64_t> to_ts) const;
-    // Content search ("what did I say about ...?"): fuzzy over voice-span
-    // vectors, tagged or not — voice is the sole gate here.
+
     std::vector<VoiceHit> voice_nearest(const std::vector<float>& query,
                                         Voice v,
                                         std::optional<int64_t> from_ts,
@@ -262,21 +219,17 @@ public:
                                         std::optional<float> max_distance,
                                         std::string& reason_out) const;
 
-    // ---- THE DELIBERATE FULL PULL — the whole original turn, or nothing ----
     const RagEntry* full_turn(uint64_t entry_id) const;
 
-    // ---- THREAD OPERATIONS ----
     std::vector<const RagEntry*> get_thread(const std::string& thread_id,
                                             bool include_deleted = false) const;
     size_t set_thread_state(const std::string& thread_id, uint16_t marker,
                             const std::string& reason,
                             std::string& refusal_out);
 
-    // ---- DELIBERATE RECALL of deleted material ----
     std::vector<SpanHit> recall_deleted(const TagQuery& q,
                                         std::string& reason_out) const;
 
-    // ---- EXPIRY DATA (driven by the watchdog) ----
     bool register_expiry(const std::string& thread_id, int64_t expiry_ts,
                          std::string& reason_out);
     std::vector<ExpiryRecord*> due_expiries(int64_t now);
@@ -291,7 +244,7 @@ private:
     bool span_frame_ok(const TagSpan& s, const TagQuery& q) const;
     bool span_voice_ok(const RagEntry& e, const TagSpan& s,
                        const TagQuery& q) const;
-    bool gate(const RagEntry& e) const; // has spans, not deleted
+    bool gate(const RagEntry& e) const;
 
     std::vector<RagEntry>     entries_;
     std::vector<ExpiryRecord> expiries_;
@@ -299,4 +252,4 @@ private:
     RagPersistence* persistence_ = nullptr;
 };
 
-} // namespace prime::rag
+}

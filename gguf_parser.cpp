@@ -19,15 +19,11 @@
 
 namespace prime {
 
-// ---------------------------------------------------------------------------
-// GGUF on-disk constants
-// ---------------------------------------------------------------------------
 namespace {
 
-constexpr uint32_t GGUF_MAGIC = 0x46554747; // "GGUF" little-endian
+constexpr uint32_t GGUF_MAGIC = 0x46554747;
 constexpr uint32_t GGUF_DEFAULT_ALIGNMENT = 32;
 
-// GGUF metadata value type ids
 enum : uint32_t {
     GT_UINT8 = 0, GT_INT8 = 1, GT_UINT16 = 2, GT_INT16 = 3,
     GT_UINT32 = 4, GT_INT32 = 5, GT_FLOAT32 = 6, GT_BOOL = 7,
@@ -35,9 +31,6 @@ enum : uint32_t {
     GT_FLOAT64 = 12,
 };
 
-// A forward-only cursor over the mapped bytes with bounds checking. Every read
-// validates against the end pointer so a truncated or hostile file faults here
-// rather than walking off the mapping.
 class Cursor {
 public:
     Cursor(const uint8_t* p, const uint8_t* end) : p_(p), end_(end) {}
@@ -79,14 +72,10 @@ size_t scalar_size(uint32_t type) {
         case GT_UINT16: case GT_INT16:                 return 2;
         case GT_UINT32: case GT_INT32: case GT_FLOAT32: return 4;
         case GT_UINT64: case GT_INT64: case GT_FLOAT64: return 8;
-        default: return 0; // STRING / ARRAY handled separately
+        default: return 0;
     }
 }
 
-// Read a single metadata value, returning a uint64 when the value is integral
-// (so manifest fields can pull numbers uniformly). String/array handling is
-// specialised by the caller; here we consume and discard structure we don't
-// surface, keeping the cursor aligned.
 uint64_t read_uint_value(Cursor& c, uint32_t type) {
     switch (type) {
         case GT_UINT8:  return c.read_scalar<uint8_t>();
@@ -102,11 +91,8 @@ uint64_t read_uint_value(Cursor& c, uint32_t type) {
     }
 }
 
-} // anonymous namespace
+}
 
-// ---------------------------------------------------------------------------
-// ModelFamily helpers
-// ---------------------------------------------------------------------------
 ModelFamily family_from_arch(const std::string& arch) {
     if (arch == "qwen2") return ModelFamily::Qwen2;
     if (arch == "qwen3") return ModelFamily::Qwen3;
@@ -130,9 +116,6 @@ const char* family_name(ModelFamily f) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Platform mapping — POSIX mmap over the whole file, read-only.
-// ---------------------------------------------------------------------------
 struct GgufParser::Mapping {
     int            fd   = -1;
     const uint8_t* view = nullptr;
@@ -162,17 +145,11 @@ GgufParser::open_mapping(const std::string& path) {
         throw std::runtime_error("GGUF: mmap failed: " + path);
     m->view = static_cast<const uint8_t*>(view);
 
-    // The header/metadata region is walked sequentially right now; the tensor
-    // payload is touched randomly later by kernels. Advise the kernel of both
-    // so readahead is sensible without forcing the whole file resident.
     ::madvise(const_cast<uint8_t*>(m->view), m->size, MADV_RANDOM);
 
     return m;
 }
 
-// ---------------------------------------------------------------------------
-// Parse — walk header, metadata, tensor table; resolve tensor addresses.
-// ---------------------------------------------------------------------------
 void GgufParser::parse(WeightRegion& region, const Mapping& m) {
     const uint8_t* begin = m.view;
     const uint8_t* end   = m.view + m.size;
@@ -191,17 +168,12 @@ void GgufParser::parse(WeightRegion& region, const Mapping& m) {
     ModelManifest& man = region.manifest;
     uint32_t alignment = GGUF_DEFAULT_ALIGNMENT;
 
-    // Deferred resolution: arch is announced by general.architecture, but the
-    // arch-prefixed keys (e.g. "qwen2.block_count") may appear in any order.
-    // Collect prefixed numerics into a side table keyed by suffix, resolve
-    // after the metadata pass.
     std::unordered_map<std::string, uint64_t> arch_numeric;
 
     for (uint64_t i = 0; i < kv_count; ++i) {
         std::string key = c.read_string();
         uint32_t vtype  = c.read_scalar<uint32_t>();
 
-        // ---- string-valued keys we care about ----
         if (vtype == GT_STRING) {
             std::string val = c.read_string();
             if (key == "general.architecture") {
@@ -213,7 +185,6 @@ void GgufParser::parse(WeightRegion& region, const Mapping& m) {
             continue;
         }
 
-        // ---- array-valued keys: only the token list is surfaced ----
         if (vtype == GT_ARRAY) {
             uint32_t elem_type = c.read_scalar<uint32_t>();
             uint64_t len       = c.read_scalar<uint64_t>();
@@ -233,31 +204,24 @@ void GgufParser::parse(WeightRegion& region, const Mapping& m) {
             continue;
         }
 
-        // ---- scalar numerics ----
-        // read_uint_value consumes integral types and returns the value; for
-        // float types it returns 0 and consumes nothing, so we skip them here.
         uint64_t num = read_uint_value(c, vtype);
         if (vtype == GT_FLOAT32) c.skip(4);
         if (vtype == GT_FLOAT64) c.skip(8);
 
         if (key == "tokenizer.ggml.eos_token_id") {
-            // The stop token, surfaced by name — the generic prefix-strip
-            // below would mangle this key into the arch table and lose it.
-            // Presence is stated explicitly: 0 is a valid token id, so
-            // absence is never represented by a default.
+
             man.eos_token_id      = num;
             man.eos_token_present = true;
         } else if (key == "general.alignment") {
             alignment = static_cast<uint32_t>(num ? num : GGUF_DEFAULT_ALIGNMENT);
         } else {
-            // strip the arch prefix if present: "qwen2.block_count" -> "block_count"
+
             auto dot = key.find('.');
             if (dot != std::string::npos)
                 arch_numeric[key.substr(dot + 1)] = num;
         }
     }
 
-    // Resolve manifest numerics from the suffix table.
     auto pick = [&](const char* suffix) -> uint64_t {
         auto it = arch_numeric.find(suffix);
         return it == arch_numeric.end() ? 0 : it->second;
@@ -274,7 +238,6 @@ void GgufParser::parse(WeightRegion& region, const Mapping& m) {
     if (man.head_count_kv == 0) man.head_count_kv = man.head_count;
     man.vocab_size           = region.vocab.id_to_text.size();
 
-    // ---- tensor table ----
     region.tensors.reserve(tensor_count);
     for (uint64_t i = 0; i < tensor_count; ++i) {
         TensorDesc t;
@@ -288,26 +251,19 @@ void GgufParser::parse(WeightRegion& region, const Mapping& m) {
         region.tensors.push_back(std::move(t));
     }
 
-    // Tensor data begins at the next alignment boundary after the table.
     uint64_t header_bytes = static_cast<uint64_t>(c.ptr() - begin);
     uint64_t pad = (alignment - (header_bytes % alignment)) % alignment;
     const uint8_t* data_base = c.ptr() + pad;
     if (data_base > end)
         throw std::runtime_error("GGUF: tensor data base past end of file");
 
-    // Resolve each tensor to an absolute address inside the mapping.
     for (auto& t : region.tensors)
         t.data = data_base + t.offset;
 
-    // The region spans from the data base to the end of the file — that is the
-    // weight payload the allocator accounts for in the flat address space.
     region.base   = data_base;
     region.extent = static_cast<uint64_t>(end - data_base);
 }
 
-// ---------------------------------------------------------------------------
-// Public surface
-// ---------------------------------------------------------------------------
 GgufParser::GgufParser() = default;
 GgufParser::~GgufParser() = default;
 
@@ -335,7 +291,7 @@ void GgufParser::release(const std::string& path) {
     auto it = entries_.find(path);
     if (it == entries_.end()) return;
     if (--it->second->region.ref_count == 0)
-        entries_.erase(it);  // Entry dtor unmaps the file
+        entries_.erase(it);
 }
 
 size_t GgufParser::mapped_count() const {
@@ -343,4 +299,4 @@ size_t GgufParser::mapped_count() const {
     return entries_.size();
 }
 
-} // namespace prime
+}

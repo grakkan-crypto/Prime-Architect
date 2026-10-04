@@ -38,17 +38,12 @@
 
 namespace prime {
 
-// Loads existing config.json into the authoring layers on panel open. Supplied
-// by the host's owner (whoever holds the config path and a reader). Returns the
-// parsed agents and teams; the host installs them into AgentConfig/TeamConfig.
 struct LoadedConfig {
     std::vector<AgentEntry> agents;
     std::vector<TeamEntry>  teams;
 };
 using ConfigLoadFn = std::function<LoadedConfig()>;
 
-// Surfaces a save failure to the operator (first-pass hook; wire to whatever the
-// app uses for user-visible errors).
 using ErrorReportFn = std::function<void(const std::string& message)>;
 
 class ModelsPanelHost {
@@ -60,23 +55,17 @@ public:
                     NameToDepartmentFn name_to_dept,
                     ErrorReportFn report_error);
 
-    // Called from the settings menu. Triggers rescan + config load + view reset,
-    // then marks the panel open.
     void open();
 
-    // Marks closed. Does not force a save (save policy is explicit this pass);
-    // an owner wanting save-on-close can call save() before close().
     void close();
 
     bool is_open() const { return open_; }
 
-    // Draw one frame. No-op when closed. Hosts the render layer inside a window
-    // titled for the settings context; drives the explicit Save action.
     void draw();
 
 private:
-    void do_open_load();          // rescan + config load + view reset
-    bool save();                  // serialize to disk; false on failure
+    void do_open_load();
+    bool save();
     void mark_dirty() { dirty_ = true; }
 
     std::string     config_path_;
@@ -92,4 +81,4 @@ private:
     bool dirty_ = false;
 };
 
-} // namespace prime
+}

@@ -21,16 +21,13 @@ const char* kind_label(RulesKind k) {
     return "AI Rules";
 }
 
-// ImGui's text input writes into a char buffer. Sized to what the value needs
-// plus room to keep typing — not a cap on anything. There is no limit on the
-// length of any entry.
 std::vector<char> buffer_for(const std::string& value) {
     std::vector<char> b(value.size() + 4096, '\0');
     std::copy(value.begin(), value.end(), b.begin());
     return b;
 }
 
-} // namespace
+}
 
 RulesRender::RulesRender(RulesPanelIO io) : io_(std::move(io)) {}
 
@@ -85,9 +82,6 @@ void RulesRender::draw() {
     ImGui::SameLine();
     draw_pipeline_selector();
 
-    // The agent dropdown exists only for the two per-agent kinds. AI Rules is
-    // its own standing list, so there is no agent to pick and the control is
-    // absent rather than present-and-disabled.
     if (kind_ != RulesKind::AiRules) {
         ImGui::SameLine();
         draw_agent_selector();
@@ -131,8 +125,7 @@ void RulesRender::draw_pipeline_selector() {
                                                      : selected_pipeline_.c_str();
     ImGui::SetNextItemWidth(180.0f);
     if (ImGui::BeginCombo("##pipeline", preview)) {
-        // Read live when the dropdown opens. Nothing cached between frames and
-        // nothing maintained anywhere.
+
         std::vector<std::string> pipelines;
         if (io_.list_pipelines) pipelines = io_.list_pipelines();
 
@@ -180,8 +173,6 @@ void RulesRender::draw_rules_list() {
         return;
     }
 
-    // The header shown here is the header that goes into the pool, so what the
-    // operator sees and what the agent reads are labelled identically.
     if (list == kAiRulesList) {
         ImGui::TextUnformatted("AI Rules");
         ImGui::TextDisabled("Read by every agent in this pipeline, unmasked.");
@@ -208,8 +199,7 @@ void RulesRender::draw_rules_list() {
 
             ImGui::SameLine();
             if (ImGui::SmallButton("Save")) {
-                // One entry, however many lists it appears in — so this lands
-                // everywhere at once.
+
                 const bool ok = io_.edit_rule &&
                                 io_.edit_rule(selected_pipeline_, row.id, edit_buffer_);
                 last_failed_ = !ok;
@@ -229,11 +219,9 @@ void RulesRender::draw_rules_list() {
                 edit_buffer_ = row.text;
             }
 
-            // Copy: link this same entry into another list.
             ImGui::SameLine();
             if (ImGui::SmallButton("Copy")) copy_menu_for_ = row.id;
 
-            // Unlink is offered only where there is a link to break.
             if (row.linked()) {
                 ImGui::SameLine();
                 if (ImGui::SmallButton("Unlink")) {
@@ -265,7 +253,6 @@ void RulesRender::draw_rules_list() {
 
     ImGui::Separator();
 
-    // Add a new entry to this list.
     auto buf = buffer_for(new_entry_buffer_);
     ImGui::SetNextItemWidth(-120.0f);
     if (ImGui::InputText("##new", buf.data(), buf.size()))
@@ -290,16 +277,13 @@ void RulesRender::draw_copy_menu(const RuleRow& row) {
     ImGui::Indent();
     ImGui::TextDisabled("Copy to:");
 
-    // Every list this entry is not already in. AI Rules is offered when viewing
-    // an agent, and every agent is offered from anywhere — copying works in any
-    // direction, from a standalone entry or an already-linked one.
     std::vector<std::string> destinations;
     if (kind_ != RulesKind::AiRules) destinations.push_back(kAiRulesList);
     for (const auto& a : agents_) destinations.push_back(a);
 
     for (const auto& dest : destinations) {
         if (std::find(row.lists.begin(), row.lists.end(), dest) != row.lists.end())
-            continue;   // already there
+            continue;
 
         ImGui::PushID(dest.c_str());
         if (ImGui::SmallButton(dest.c_str())) {
@@ -329,17 +313,11 @@ void RulesRender::draw_directive() {
         return;
     }
 
-    // The header the agent reads. Directive needs it because the "You are" line
-    // is deliberately functional and carries no agent name — without this,
-    // nothing in the block says who it belongs to.
     ImGui::Text("%s Functional Directive", selected_agent_.c_str());
     ImGui::TextDisabled("Read by %s alone. Never its Arbiter, never anyone else.",
                         selected_agent_.c_str());
     ImGui::Separator();
 
-    // The fixed identity line. Singular, always present, first — because content
-    // immediately after "You are" is weighted more heavily than instruction
-    // given elsewhere. Function, never persona.
     ImGui::TextUnformatted("Functional identity");
     auto you_buf = buffer_for(you_are_buffer_);
     ImGui::SetNextItemWidth(-90.0f);
@@ -359,7 +337,6 @@ void RulesRender::draw_directive() {
     ImGui::Spacing();
     ImGui::TextUnformatted("Behaviour");
 
-    // No copy, no unlink. Directive is agent-specific by nature and never shared.
     for (size_t i = 0; i < directive_.entries.size(); ++i) {
         ImGui::PushID(static_cast<int>(i));
 
@@ -406,4 +383,4 @@ void RulesRender::draw_directive() {
     ImGui::EndDisabled();
 }
 
-} // namespace prime
+}

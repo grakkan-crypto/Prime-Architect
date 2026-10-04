@@ -50,9 +50,6 @@
 
 namespace prime {
 
-// Resolves a pipeline name to the agents belonging to it, read live from that
-// pipeline's own declaration. Called every frame; nothing about the result is
-// kept.
 using RosterLookupFn = std::function<std::vector<std::string>(const std::string& pipeline)>;
 
 class MainWindowHost {
@@ -86,16 +83,14 @@ private:
     RosterLookupFn                  roster_lookup_;
 
     LayoutTabs             tabs_;
-    ChatRender             chat_;    // shared across tabs, never per-tab
-    InputRender            input_;   // shared across tabs, never per-tab
+    ChatRender             chat_;
+    InputRender            input_;
     DiagnosticsPanelRender diagnostics_;
     TurnActions            actions_;
 
     RulesRender&           rules_;
     TemperatureRender&     temperature_;
 
-    // Constructed where RebuttalHost lives (it outlives the shell, same as
-    // rules and temperature); the shell only draws it.
     prime::frontend::RebuttalRender& rebuttal_;
 
     bool diagnostics_open_ = false;
@@ -103,4 +98,4 @@ private:
     bool temperature_open_ = false;
 };
 
-} // namespace prime
+}

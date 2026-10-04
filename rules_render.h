@@ -60,42 +60,33 @@ namespace prime {
 
 enum class RulesKind { AiRules, AgentRules, AgentDirective };
 
-// One rule as the panel shows it.
 struct RuleRow {
     int         id = 0;
     std::string text;
-    // Every list this same entry appears in. More than one means linked, and the
-    // unlink control is offered.
+
     std::vector<std::string> lists;
     bool linked() const { return lists.size() > 1; }
 };
 
-// One agent's directive as the panel shows it.
 struct DirectiveView {
     std::string              you_are;
     std::vector<std::string> entries;
 };
 
-// Everything the panel reads and writes, supplied by the host so this file makes
-// no engine or filesystem calls of its own.
 struct RulesPanelIO {
     std::function<std::vector<std::string>()> list_pipelines;
     std::function<std::string()>              active_pipeline;
 
-    // Agents belonging to a pipeline, and who validates each one's Rules.
     std::function<std::vector<std::string>(const std::string& pipeline)> agents_for;
     std::function<std::string(const std::string& pipeline,
                               const std::string& agent)> overseer_of;
 
-    // `list` is "AI Rules" or an agent name.
     std::function<std::vector<RuleRow>(const std::string& pipeline,
                                        const std::string& list)> read_rules;
 
     std::function<std::optional<DirectiveView>(const std::string& pipeline,
                                                const std::string& agent)> read_directive;
 
-    // All return false on refusal or write failure; the panel surfaces it rather
-    // than assuming success.
     std::function<bool(const std::string& pipeline,
                        const std::string& list,
                        const std::string& text)> add_rule;
@@ -131,7 +122,6 @@ private:
     void draw_directive();
     void draw_copy_menu(const RuleRow& row);
 
-    // The list currently being shown: "AI Rules" or the selected agent's name.
     std::string current_list() const;
 
     void reload();
@@ -146,17 +136,15 @@ private:
     std::vector<RuleRow>     rows_;
     DirectiveView            directive_;
 
-    // In-progress edits. Local until committed, so nothing half-typed reaches
-    // the store.
     int         editing_id_ = 0;
     std::string edit_buffer_;
     std::string new_entry_buffer_;
     std::string you_are_buffer_;
 
-    int         copy_menu_for_ = 0;   // which row's copy menu is open
+    int         copy_menu_for_ = 0;
 
     bool        last_failed_ = false;
     std::string last_message_;
 };
 
-} // namespace prime
+}

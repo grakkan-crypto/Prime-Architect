@@ -43,37 +43,15 @@
 
 namespace prime::frontend {
 
-// Raises and reflects the user's abort of the active turn. Holds references to
-// the two pieces of state it coordinates — the live turn (to know what is being
-// aborted and to close it) and the shared abort flag the inference layer watches.
-// It owns neither; it borrows both, the same non-owning-reference pattern used
-// across frontier state.
 class Abort {
 public:
     Abort(TurnBook& turns, std::atomic<bool>& abort_flag)
         : turns_(turns), abort_flag_(abort_flag) {}
 
-    // The user pressed abort. Targets whatever turn is currently active, read
-    // live from the TurnBook so a rebuttal that rebound "current" is the thing
-    // hit. Sets the shared flag the inference layer watches, then closes the
-    // active turn so bookkeeping does not leave it open. If no turn is active,
-    // this is a visible no-op (the flag is not set, nothing is closed) — there is
-    // nothing to abort and the mechanism says so by doing nothing, not by
-    // pretending it acted.
-    //
-    // Returns the id of the turn that was aborted, or an invalid TurnId when
-    // there was no active turn — so the caller can log truthfully which turn (if
-    // any) it stopped.
     TurnId request();
 
-    // Whether an abort is currently raised. The inference layer reads the atomic
-    // directly; this is for callers holding an Abort that want the same answer
-    // without reaching for the flag.
     bool raised() const { return abort_flag_.load(); }
 
-    // Clear the abort state at the start of a new turn, so a prior abort never
-    // bleeds into the next turn. Called by the turn runner when it opens a fresh
-    // turn, not by the user.
     void reset();
 
 private:
@@ -81,4 +59,4 @@ private:
     std::atomic<bool>& abort_flag_;
 };
 
-} // namespace prime::frontend
+}

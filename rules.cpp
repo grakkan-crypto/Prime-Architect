@@ -9,34 +9,17 @@
 #include "rules.h"
 
 #include "file_loader.h"
-#include "live_registry.h"      // the live pipeline name and roster
-#include "name_match.h"         // every question asked of a name
-#include "pipeline_loader.h"    // payload category names
-#include "pool_maintenance.h"   // the class down; every pool up
-#include "text_file.h"          // find_block, read_string_list
+#include "live_registry.h"
+#include "name_match.h"
+#include "pipeline_loader.h"
+#include "pool_maintenance.h"
+#include "text_file.h"
 
 #include <algorithm>
 #include <cctype>
 #include <set>
 #include <utility>
 
-// ---------------------------------------------------------------------------
-// FORWARD DECLARATIONS — called exactly as if they exist; each real header
-// replaces its declaration here outright, with the calls below unchanged.
-//
-// THE ROOTS — supplied by the OS. Nothing beyond the formula is fixed until
-// it exists (Ruling 13).
-//
-// THE ONE LIVE POOLMAINTENANCE — reached the same way the live registry is:
-// one instance, one accessor. The class-wide teardown and the one-pool mint
-// are its own operations, called on it directly below.
-//
-// >>> TEMPORARY — MASKING IS NOT BUILT (Ruling 14) <<<
-// The pool being minted now needs system-driven masking on, by default.
-// That is the whole of what Rules has to say about it. This call is
-// replaced outright when Masking exists. It is not a quiet no-op and must
-// not become one.
-// ---------------------------------------------------------------------------
 namespace prime {
 
 std::string os_rules_root();
@@ -47,13 +30,11 @@ PoolMaintenance& pool_maintenance();
 void MASKING_TEMPORARY_pool_being_minted_needs_mask(const std::string& id_type, int id,
                                                     const std::string& shared_directive_name);
 
-} // namespace prime
+}
 
 namespace prime {
 
 namespace {
-
-// ---- shared directive names — one table ------------------------------------
 
 struct SharedName {
     SharedDirective kind;
@@ -69,20 +50,13 @@ constexpr SharedName kSharedNames[] = {
     { SharedDirective::ProblemSolvingConstituents, "ProblemSolving-Constituents" },
 };
 
-// One acquired item, inside the dock only. The pool is what either branch
-// receives. For a shared directive, the readers were the reason it was read
-// at all, so they ride with it to the mint and never leave the dock.
 struct Acquired {
     RulesPool                pool;
-    std::vector<std::string> readers;   // shared directives only
+    std::vector<std::string> readers;
     bool                     masked = false;
 };
 
-} // namespace
-
-// ===========================================================================
-// THE STANDING DECLARATION — data, read directly by whoever hands over.
-// ===========================================================================
+}
 
 const std::vector<std::string> Rules::declared_needs = {
     payload_categories::kPipelineName,
@@ -95,10 +69,6 @@ const char* shared_directive_name(SharedDirective kind) {
     return "";
 }
 
-// ===========================================================================
-// THE ONE DOCKED OPERATION — acquire, then branch. Everything inside.
-// ===========================================================================
-
 void Rules::dock(const std::string& pipeline_name,
                  const std::vector<std::string>& roster,
                  Branch branch) {
@@ -106,9 +76,6 @@ void Rules::dock(const std::string& pipeline_name,
     request.entries.push_back({ [this, pipeline_name, roster, branch](const Disk& disk) {
         EntryOutcome eo;
 
-        // The roots. Not a file failure: without them nothing that looks
-        // like a path may be derived (Ruling 13), so this is reported and
-        // the operation goes no further.
         const std::string rules_root      = os_rules_root();
         const std::string directives_root = os_directives_root();
         if (rules_root.empty() || directives_root.empty()) {
@@ -116,14 +83,8 @@ void Rules::dock(const std::string& pipeline_name,
             return eo;
         }
 
-        // ===================================================================
-        // ACQUISITION — identical for both branches. Every path, every read.
-        // A read that is not Ok is FileLoader's own report; the item simply
-        // does not exist here. Nothing stops.
-        // ===================================================================
         std::vector<Acquired> acquired;
 
-        // ---- the Rules file: one read, already block-shaped ----------------
         const std::string rules_path = rules_root + "/" + pipeline_name + kRulesFileSuffix;
         {
             std::string text;
@@ -155,22 +116,19 @@ void Rules::dock(const std::string& pipeline_name,
                 }
             }
 
-            // Read fine, produced nothing — a distinct state, posted.
             const bool wellness_check_rules_file_produced_blocks =
                 read != FileRead::Ok || blocks != 0;
             (void)wellness_check_rules_file_produced_blocks;
         }
 
-        // ---- the roster, asked once: who is what ---------------------------
         const std::vector<NameParts>   parts    = break_down(roster);
         const std::vector<SplitFamily> families = split_families(roster);
         const Arbiters                 arb      = arbiters(roster);
 
-        // ---- directives: one per base, one after another ------------------
         {
             std::set<std::string> done;
             for (const auto& p : parts) {
-                if (!done.insert(p.base).second) continue;   // read once, shared
+                if (!done.insert(p.base).second) continue;
 
                 const std::string path = directives_root + "/" + p.department
                                        + "/" + p.agent + kDirectiveFileSuffix;
@@ -182,7 +140,6 @@ void Rules::dock(const std::string& pipeline_name,
                 (void)wellness_check_directive_present;
                 if (read != FileRead::Ok) continue;
 
-                // Alarm for any non-Arbiter; silent for an Arbiter's own.
                 const bool wellness_check_directive_populated =
                     !text.empty() ||
                     std::find(arb.deterministic.begin(), arb.deterministic.end(), p.base)
@@ -199,7 +156,6 @@ void Rules::dock(const std::string& pipeline_name,
             }
         }
 
-        // ---- the six shared directives: readers exist, or nothing to read -
         std::vector<std::string> constituents;
         std::vector<std::string> parents;
         for (const auto& f : families) {
@@ -262,11 +218,6 @@ void Rules::dock(const std::string& pipeline_name,
             acquired.push_back(std::move(a));
         }
 
-        // ===================================================================
-        // THE BRANCH (Ruling 9). Nothing above this line knows which.
-        // ===================================================================
-
-        // ---- EDIT: hold exactly what was acquired, nothing else -----------
         if (branch == Branch::Edit) {
             held_pipeline_   = pipeline_name;
             held_rules_path_ = rules_path;
@@ -276,26 +227,20 @@ void Rules::dock(const std::string& pipeline_name,
             return eo;
         }
 
-        // ---- LOAD: the class down, once, now (Ruling 6) -------------------
-        // The action, the id type, the value. Four id types exist on a pool;
-        // this names which.
         pool_maintenance().destroy("Class ID", 2);
         const bool wellness_check_rules_class_torn_down = true;
         (void)wellness_check_rules_class_torn_down;
 
-        // ---- then one item at a time: resolve, mint, move on --------------
         for (auto& a : acquired) {
             std::vector<std::string> readers;
             std::string content = std::move(a.pool.content);
 
             switch (a.pool.kind) {
                 case RulesPoolKind::Rules: {
-                    // The one field read from a block: who it is for.
+
                     std::vector<std::string> audience;
                     read_string_list(content, 1, content.size() - 1, "audience", audience);
 
-                    // First pass: agents. The whole-roster name is everyone;
-                    // any other name is every roster agent sharing its base.
                     std::set<std::string> set;
                     for (const auto& declared : break_down(audience)) {
                         if (declared.name == kAiRulesList) {
@@ -306,8 +251,6 @@ void Rules::dock(const std::string& pipeline_name,
                             if (p.base == declared.base) set.insert(p.name);
                     }
 
-                    // Second pass, over exactly those: each one's Arbiter, if
-                    // the roster has it (Ruling 4).
                     const std::vector<std::string> agents(set.begin(), set.end());
                     for (const auto& agent : agents) {
                         const std::string arbiter = arbiter_for(roster, agent);
@@ -316,10 +259,6 @@ void Rules::dock(const std::string& pipeline_name,
 
                     readers.assign(set.begin(), set.end());
 
-                    // TRIM. The audience field routed this block here; it is
-                    // not content. Cut the field — name, colon, list, and the
-                    // comma joining it to its neighbour — and carry the rest
-                    // of the block verbatim.
                     const size_t name_at = content.find("\"audience\"");
                     size_t lb = 0, le = 0;
                     if (name_at != std::string::npos &&
@@ -343,8 +282,7 @@ void Rules::dock(const std::string& pipeline_name,
                     break;
                 }
                 case RulesPoolKind::AgentDirective:
-                    // The agent and its Split cohort: every roster agent with
-                    // this base. Never an Arbiter.
+
                     for (const auto& p : parts)
                         if (p.base == a.pool.name) readers.push_back(p.name);
                     break;
@@ -355,8 +293,6 @@ void Rules::dock(const std::string& pipeline_name,
                     break;
             }
 
-            // This pool, visible to these agents. Handed over; whether it
-            // stood is PoolMaintenance's business, never read here.
             pool_maintenance().mint("Class ID", 2, readers, content);
         }
 
@@ -366,24 +302,15 @@ void Rules::dock(const std::string& pipeline_name,
 
     FileLoader loader;
     const LoaderReport report = loader.load(request);
-    (void)report;   // FileLoader's own report; Wellness reads it there
+    (void)report;
 }
-
-// ===========================================================================
-// WHAT AN EDIT SESSION HOLDS
-// ===========================================================================
 
 std::vector<RulesPool>& Rules::held() {
     return held_;
 }
 
-// ===========================================================================
-// SAVE — hand over what is held and forget it in the same motion; then the
-// live check; then the ordinary Load branch if this is the running pipeline.
-// ===========================================================================
-
 void Rules::save() {
-    // Handed over and gone. From here Rules holds nothing.
+
     std::string            pipeline   = std::move(held_pipeline_);
     std::string            rules_path = std::move(held_rules_path_);
     std::vector<RulesPool> pools      = std::move(held_);
@@ -395,8 +322,6 @@ void Rules::save() {
     request.entries.push_back({ [rules_path, pools = std::move(pools)](const Disk& disk) {
         EntryOutcome eo;
 
-        // The Rules content, as the ONE file it always was: every block,
-        // in the order held, inside the file's own envelope.
         std::string rules = "{\n  \"rules\": [\n";
         bool first = true;
         for (const auto& p : pools) {
@@ -406,12 +331,11 @@ void Rules::save() {
             first = false;
         }
         rules += "\n  ]\n}\n";
-        disk.save(rules_path, rules);           // FileLoader's own result; not read here
+        disk.save(rules_path, rules);
 
-        // Every directive, to the path it came from.
         for (const auto& p : pools) {
             if (p.kind == RulesPoolKind::Rules) continue;
-            disk.save(p.path, p.content);       // FileLoader's own result; not read here
+            disk.save(p.path, p.content);
         }
 
         eo.ok = true;
@@ -420,16 +344,11 @@ void Rules::save() {
 
     FileLoader loader;
     const LoaderReport written = loader.load(request);
-    (void)written;   // FileLoader's own report; Wellness reads it there
+    (void)written;
 
-    // ---- the loaded pipeline: one direct read, then the ordinary load ------
     if (live_registry().pipeline_name() != pipeline) return;
     dock(pipeline, live_registry().agent_names(), Branch::Load);
 }
-
-// ===========================================================================
-// CANCEL — what is held is gone. Nothing is written anywhere.
-// ===========================================================================
 
 void Rules::cancel() {
     held_pipeline_.clear();
@@ -437,4 +356,4 @@ void Rules::cancel() {
     held_.clear();
 }
 
-} // namespace prime
+}

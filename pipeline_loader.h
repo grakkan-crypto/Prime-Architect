@@ -220,22 +220,18 @@ namespace prime {
 //   - every agent's bits fit in 2 + 3 × mask_count bits (no bit set above)
 // ===========================================================================
 
-// THE CEILING. 2 + 3 × 10 = 32 bits: an agent's bits fill exactly one
-// 32-bit word at the ceiling. Raising this is an edit to this header only.
-// A pool that exceeds it is a shape N, and the load stops (Ruling 6) — it is
-// never truncated, wrapped, or quietly dropped.
 inline constexpr std::uint32_t kMaxMasksPerPool = 10;
 
 struct PoolAgent {
-    std::string   agent;   // agent name, exactly as it appears in the roster
-    std::uint32_t bits;    // 2 access bits, then 3 bits per mask
+    std::string   agent;
+    std::uint32_t bits;
 };
 
 struct PoolDeclaration {
-    std::string            name;           // pool name, no prefix
-    std::uint32_t          mask_count;     // how many masks this pool carries
-    std::uint32_t          mask_triggers;  // 3 bits per mask, in mask order
-    std::vector<PoolAgent> agents;         // presence here IS read access
+    std::string            name;
+    std::uint32_t          mask_count;
+    std::uint32_t          mask_triggers;
+    std::vector<PoolAgent> agents;
 };
 
 struct PipelinePayload {
@@ -277,10 +273,7 @@ public:
     PipelineLoader(const PipelineLoader&)            = delete;
     PipelineLoader& operator=(const PipelineLoader&) = delete;
 
-    // THE ONE CALL. The caller hands in the name and the pipeline's own
-    // function; this runs it, posts the shape checks, fires everything
-    // downstream, and returns immediately. Returns nothing (Ruling 8).
     void load(const std::string& pipeline_name, const PipelineFn& pipeline_fn);
 };
 
-} // namespace prime
+}

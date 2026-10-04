@@ -23,7 +23,6 @@ void InputRender::draw(bool busy) {
 
     const bool has_text = !ingestion_.composition.empty();
 
-    // Wiping the box aborts. Fires on the clear, not every frame it sits empty.
     if (had_text_last_frame_ && !has_text && abort_) abort_();
     had_text_last_frame_ = has_text;
 
@@ -44,18 +43,15 @@ void InputRender::draw(bool busy) {
 }
 
 void InputRender::draw_questions_box() {
-    if (ingestion_.questions.empty()) return;   // gone entirely, no space taken
+    if (ingestion_.questions.empty()) return;
 
     const auto& question = ingestion_.questions.front();
 
-    // Switched to a different question — drop any half-typed answer so it can't
-    // end up attached to the wrong one.
     if (answering_ != question.number) {
         answering_ = question.number;
         answer_[0] = '\0';
     }
 
-    // Height grows and shrinks with the number of questions waiting.
     const float line   = ImGui::GetTextLineHeightWithSpacing();
     const float height = line * (2.0f + static_cast<float>(ingestion_.questions.size()));
 
@@ -83,4 +79,4 @@ void InputRender::draw_questions_box() {
     ImGui::Spacing();
 }
 
-} // namespace prime
+}

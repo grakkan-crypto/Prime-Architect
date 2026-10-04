@@ -35,12 +35,9 @@ void ModelsPanelHost::close() {
 }
 
 void ModelsPanelHost::do_open_load() {
-    // Rescan the disk fresh every open — the walk is how bloat becomes visible.
+
     discovery_.scan();
 
-    // Load current config into the authoring layers, if a loader is provided.
-    // Absent loader means start empty (e.g. no config yet); that is a legitimate
-    // clean state, not an error to invent an entry over.
     if (load_config_) {
         LoadedConfig loaded = load_config_();
         agents_.set_entries(std::move(loaded.agents));
@@ -57,7 +54,7 @@ bool ModelsPanelHost::save() {
     if (!ok) {
         if (report_error_)
             report_error_("Failed to write config to " + config_path_);
-        return false;   // surfaced, not swallowed
+        return false;
     }
     dirty_ = false;
     return true;
@@ -66,9 +63,8 @@ bool ModelsPanelHost::save() {
 void ModelsPanelHost::draw() {
     if (!open_) return;
 
-    // First-pass: a plain window standing in for the settings-reached popup.
     if (ImGui::Begin("Models", &open_)) {
-        // Save bar.
+
         if (dirty_) {
             if (ImGui::Button("Save"))
                 save();
@@ -85,8 +81,6 @@ void ModelsPanelHost::draw() {
     }
     ImGui::End();
 
-    // The window's close box flipped open_ via the &open_ binding; nothing else
-    // to reconcile — save policy is explicit, so closing does not auto-persist.
 }
 
-} // namespace prime
+}

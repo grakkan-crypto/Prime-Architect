@@ -24,4 +24,4 @@ bool ResidentContext::remove(const std::string& id) {
     return false;
 }
 
-} // namespace prime::frontend
+}

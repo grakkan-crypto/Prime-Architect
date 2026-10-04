@@ -12,15 +12,12 @@ namespace prime {
 
 namespace {
 
-// Specialised modality departments: assignment restricted to their own folder.
-// Hardcoded by design — a new modality is added here by explicit instruction,
-// never auto-derived from disk.
 const std::array<const char*, 5> kSpecialised = {
-    "Aperture",  // vision
-    "Accord",    // asr
-    "Artist",    // image
-    "Artisan",   // video
-    "Announcer"  // tts
+    "Aperture",
+    "Accord",
+    "Artist",
+    "Artisan",
+    "Announcer"
 };
 
 std::string mint_id(const std::string& prefix) {
@@ -36,7 +33,7 @@ std::string mint_id(const std::string& prefix) {
     return prefix + "_" + suffix;
 }
 
-} // namespace
+}
 
 bool AgentConfig::is_specialised_department(const std::string& department) {
     return std::any_of(kSpecialised.begin(), kSpecialised.end(),
@@ -141,4 +138,4 @@ AgentConfig::assignable_models(const std::string& department,
     return out;
 }
 
-} // namespace prime
+}

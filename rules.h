@@ -200,38 +200,28 @@
 
 namespace prime {
 
-// The audience name meaning "the whole roster". A real list every agent
-// reads, without exception.
 inline constexpr const char* kAiRulesList = "AI Rules";
 
 inline constexpr const char* kDirectiveFileSuffix = "-directive.json";
 inline constexpr const char* kRulesFileSuffix     = "-rules.json";
 
-// The six shared, role-based directives. Singular by count — one of each in
-// the whole system.
 enum class SharedDirective {
-    ArbiterDeterministic,       // every non-CoT Arbiter
-    ArbiterCoT,                 // every CoT Arbiter
-    SplitRole,                  // every constituent                 (not masked)
-    Ideation,                   // every parent and constituent      (masked)
-    ProblemSolvingParent,       // every parent                      (masked)
-    ProblemSolvingConstituents, // every constituent                 (masked)
+    ArbiterDeterministic,
+    ArbiterCoT,
+    SplitRole,
+    Ideation,
+    ProblemSolvingParent,
+    ProblemSolvingConstituents,
 };
 
 const char* shared_directive_name(SharedDirective kind);
 
-// ---- what crosses the UI boundary, either direction (Ruling 11) -------------
-
 enum class RulesPoolKind {
-    Rules,             // one block of the pipeline's Rules file
-    AgentDirective,    // one agent's (one split set's) own directive
-    SharedDirective,   // one of the six
+    Rules,
+    AgentDirective,
+    SharedDirective,
 };
 
-// Kind, name, path, content — nothing else. For a Rules block: name is the
-// pipeline, path is the one Rules file, content is the block verbatim. For
-// a directive: name is the agent's base or the shared name, path is that
-// file, content is that file's text verbatim.
 struct RulesPool {
     RulesPoolKind kind = RulesPoolKind::Rules;
     std::string   name;
@@ -239,7 +229,6 @@ struct RulesPool {
     std::string   content;
 };
 
-// ---- the mechanism ----------------------------------------------------------
 class Rules {
 public:
     Rules() = default;
@@ -247,42 +236,25 @@ public:
     Rules(const Rules&)            = delete;
     Rules& operator=(const Rules&) = delete;
 
-    // This file's standing declaration of the payload categories it needs
-    // (payload_categories vocabulary). Data, read directly by whoever
-    // hands the payload over.
     static const std::vector<std::string> declared_needs;
 
-    // The two things that can follow acquisition. The branch is data handed
-    // to the one operation, not two operations.
     enum class Branch { Load, Edit };
 
-    // THE ONE DOCKED OPERATION. Docks, derives every path, reads
-    // everything, then branches (Ruling 9). Load: the class down, every
-    // item minted one at a time. Edit: everything acquired is held, exactly
-    // as acquired, until save() or cancel(). Nothing is handed back:
-    // whether pools stand is not this file's to assert, and what an Edit
-    // session holds is reached through held().
     void dock(const std::string& pipeline_name,
               const std::vector<std::string>& roster,
               Branch branch);
 
-    // What the open Edit session holds. The Host edits this in place — one
-    // copy, this one. Empty when no session is open.
     std::vector<RulesPool>& held();
 
-    // SAVE. Hands what is held to FileLoader and forgets it in the same
-    // motion; then the live check, then the ordinary Load branch if this is
-    // the running pipeline (Ruling 10).
     void save();
 
-    // CANCEL. What is held is gone. Nothing is written anywhere.
     void cancel();
 
 private:
-    // Held only for the open duration of an Edit session.
+
     std::string            held_pipeline_;
     std::string            held_rules_path_;
     std::vector<RulesPool> held_;
 };
 
-} // namespace prime
+}

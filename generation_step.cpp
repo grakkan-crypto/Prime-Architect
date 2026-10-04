@@ -55,19 +55,11 @@
 
 namespace prime {
 
-// ---------------------------------------------------------------------------
-// Constructor
-// ---------------------------------------------------------------------------
-
 GenerationStep::GenerationStep(KernelImpl& kernels, KvPoolAllocator& pool)
     : kernels_(kernels), pool_(pool) {}
 
-// ---------------------------------------------------------------------------
-// step() — full forward pass for one new token
-// ---------------------------------------------------------------------------
-
 StepResult GenerationStep::step(ResidentModel& model, uint32_t token_id) {
-    // Validate before touching anything.
+
     std::string reason;
     if (!model.is_valid(reason)) {
         throw std::runtime_error("GenerationStep::step — invalid model: " + reason);
@@ -79,22 +71,12 @@ StepResult GenerationStep::step(ResidentModel& model, uint32_t token_id) {
     const uint32_t HD  = model.head_dim;
     const uint32_t L   = model.n_layers;
 
-    // ------------------------------------------------------------------
-    // Activation buffers — [1, D] f32 throughout (single-token decode).
-    // x is the "current state of the token" as it flows through the layers.
-    // norm_out holds the normed version before each sub-block.
-    // attn_out holds the attention kernel's output before residual add.
-    // ffn_out holds the feedforward kernel's output before residual add.
-    // ------------------------------------------------------------------
-    std::vector<float> x        (D, 0.0f);  // main residual stream
-    std::vector<float> norm_out (D, 0.0f);  // pre-block normed activation
-    std::vector<float> attn_out (H * HD, 0.0f); // attention output
-    std::vector<float> ffn_out  (D, 0.0f);  // feedforward output
-    std::vector<float> q_buf    (H * HD, 0.0f); // query buffer for attention kernel
+    std::vector<float> x        (D, 0.0f);
+    std::vector<float> norm_out (D, 0.0f);
+    std::vector<float> attn_out (H * HD, 0.0f);
+    std::vector<float> ffn_out  (D, 0.0f);
+    std::vector<float> q_buf    (H * HD, 0.0f);
 
-    // ------------------------------------------------------------------
-    // 1. Embedding — token id -> hidden_dim vector
-    // ------------------------------------------------------------------
     {
         ActivationView out_view;
         out_view.data     = x.data();
@@ -113,39 +95,26 @@ StepResult GenerationStep::step(ResidentModel& model, uint32_t token_id) {
         kernels_.embedding(desc, ep, nullptr);
     }
 
-    // ------------------------------------------------------------------
-    // Attention export — allocate side-buffers if armed.
-    // context_len is the number of tokens already in the KV pool; the
-    // attention kernel produces one weight per prior token per head.
-    // ------------------------------------------------------------------
-    const uint64_t context_len = model.kv_position; // tokens already in pool
+    const uint64_t context_len = model.kv_position;
     StepResult result;
 
     if (model.export_attn_weights) {
-        // is_valid() already confirmed attn_export_block > 0.
+
         result.attn_weights.resize(L);
         for (uint32_t i = 0; i < L; ++i) {
-            // One float per prior token per head, per layer.
+
             result.attn_weights[i].resize(H * (context_len + 1), 0.0f);
         }
     }
 
-    // ------------------------------------------------------------------
-    // 2. Transformer layers
-    // ------------------------------------------------------------------
     for (uint32_t layer = 0; layer < L; ++layer) {
         const LayerWeights& lw = model.layers[layer];
 
-        // ---- a. Pre-attention RMS norm --------------------------------
         {
             ActivationView xv, ov;
             xv.data = x.data(); xv.n_tokens = 1; xv.dim = D; xv.dtype = DType::F32;
             ov.data = norm_out.data(); ov.n_tokens = 1; ov.dim = D; ov.dtype = DType::F32;
 
-            // The norm weight is a f32 gain vector of length D stored in the
-            // tensor. We resolve it from the WeightRegion's tensor list.
-            // The RmsNormParams.weight field expects a const float* pointing
-            // to the gain vector directly.
             const float* norm_weight = resolve_norm_weight(lw.attn_norm, "attn_norm", layer);
 
             RmsNormParams rp;
@@ -159,20 +128,8 @@ StepResult GenerationStep::step(ResidentModel& model, uint32_t token_id) {
             kernels_.rms_norm(desc, rp, nullptr);
         }
 
-        // ---- b. Attention --------------------------------------------
-        // The attention kernel reads Q from norm_out and K/V from the pool.
-        // It writes the attention output (weighted sum of V) to attn_out.
         {
-            // Q projection: norm_out -> q_buf via the Q weight matrix.
-            // NOTE: the attention kernel takes pre-projected Q. We project
-            // Q here before calling the kernel. K/V projection is handled
-            // inside the kernel using the KV cache (pre-projected K/V were
-            // written by append() at prior steps).
-            //
-            // OPEN: Q projection is a matmul (norm_out [1,D] x Wq [D, H*HD]).
-            // This is not a separate kernel — it is a weight multiply folded
-            // into the attention setup. For the reference path we do it inline
-            // here as a simple f32 matmul. The ISA path will fuse this.
+
             project_qkv(norm_out.data(), lw.attn_qkv, q_buf.data(),
                         D, H, HD, model, layer);
 
@@ -187,14 +144,13 @@ StepResult GenerationStep::step(ResidentModel& model, uint32_t token_id) {
             ap.n_heads     = H;
             ap.n_kv_heads  = HKV;
             ap.head_dim    = HD;
-            ap.base_pos    = model.kv_position;  // absolute position of this new token
+            ap.base_pos    = model.kv_position;
             ap.rope_theta  = model.rope_theta;
             ap.rope_scale  = model.rope_scale;
             ap.rope_mode   = model.rope_mode;
             ap.sliding_window = model.sliding_window;
             ap.out         = ov_attn;
 
-            // Wire export side-buffer if armed.
             if (model.export_attn_weights) {
                 ap.attn_weight_export = result.attn_weights[layer].data();
                 ap.attn_weight_block  = model.attn_export_block;
@@ -207,11 +163,8 @@ StepResult GenerationStep::step(ResidentModel& model, uint32_t token_id) {
             kernels_.attention(desc, ap, nullptr);
         }
 
-        // ---- c. Attention output projection + residual add -----------
-        // Project attn_out [H*HD] -> [D] via Wo, then add back to x.
         project_attn_out(attn_out.data(), lw.attn_out, x.data(), D, H, HD, model, layer);
 
-        // ---- d. Pre-feedforward RMS norm -----------------------------
         {
             ActivationView xv, ov;
             xv.data = x.data(); xv.n_tokens = 1; xv.dim = D; xv.dtype = DType::F32;
@@ -230,20 +183,16 @@ StepResult GenerationStep::step(ResidentModel& model, uint32_t token_id) {
             kernels_.rms_norm(desc, rp, nullptr);
         }
 
-        // ---- e. Feedforward (or MoE expert routing + feedforward) ----
         {
             ActivationView xv, ov_ffn;
             xv.data = norm_out.data(); xv.n_tokens = 1; xv.dim = D; xv.dtype = DType::F32;
             ov_ffn.data = ffn_out.data(); ov_ffn.n_tokens = 1; ov_ffn.dim = D; ov_ffn.dtype = DType::F32;
 
             if (model.ffn_variant == FfnVariant::SwiGLU_MoE && lw.expert_gate) {
-                // MoE: route first, then run selected experts.
-                const uint64_t expert_count       = 0; // OPEN: resolve from manifest
-                const uint64_t experts_per_token  = 0; // OPEN: resolve from manifest
-                // DEFERRED: GgufParser does not yet expose expert_count /
-                // experts_per_token from GGUF metadata. These must be resolved
-                // from ModelManifest once the parser surfaces them.
-                // Until then, MoE models will throw below. This is loud, not silent.
+
+                const uint64_t expert_count       = 0;
+                const uint64_t experts_per_token  = 0;
+
                 if (expert_count == 0) {
                     throw std::runtime_error(
                         "GenerationStep: MoE model loaded but expert_count is 0 — "
@@ -281,7 +230,7 @@ StepResult GenerationStep::step(ResidentModel& model, uint32_t token_id) {
                 kernels_.feed_forward(ffn_desc, ffp, nullptr);
 
             } else {
-                // Dense feedforward (SwiGLU or GeGLU).
+
                 FeedForwardParams ffp;
                 ffp.x       = xv;
                 ffp.weights = lw.ffn_weights;
@@ -295,14 +244,10 @@ StepResult GenerationStep::step(ResidentModel& model, uint32_t token_id) {
             }
         }
 
-        // ---- f. Feedforward residual add -----------------------------
         for (uint32_t d = 0; d < D; ++d)
             x[d] += ffn_out[d];
     }
 
-    // ------------------------------------------------------------------
-    // 3. Final RMS norm
-    // ------------------------------------------------------------------
     {
         ActivationView xv, ov;
         xv.data = x.data(); xv.n_tokens = 1; xv.dim = D; xv.dtype = DType::F32;
@@ -321,9 +266,6 @@ StepResult GenerationStep::step(ResidentModel& model, uint32_t token_id) {
         kernels_.rms_norm(desc, rp, nullptr);
     }
 
-    // ------------------------------------------------------------------
-    // 4. Output projection — norm_out [1, D] -> logits [1, vocab_size]
-    // ------------------------------------------------------------------
     result.logits.resize(model.vocab_size, 0.0f);
     project_output(norm_out.data(), model.output_projection,
                    result.logits.data(), D, model.vocab_size, model);
@@ -331,24 +273,9 @@ StepResult GenerationStep::step(ResidentModel& model, uint32_t token_id) {
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// append() — commit chosen token K/V into the pool, advance kv_position
-//
-// The K/V values for the chosen token were computed during step() as part of
-// the attention calculation. We re-derive them here from the same token and
-// write them to the pool at position kv_position.
-//
-// DESIGN NOTE: re-deriving K/V rather than caching them from step() keeps the
-// step/append boundary clean — step() is a pure read against the pool, append()
-// is the single write. For the reference path re-derivation at batch size 1 is
-// negligible. The ISA path may choose to cache K/V from the forward pass and
-// write them in append() directly; that is a dispatch concern.
-// ---------------------------------------------------------------------------
 void GenerationStep::append(ResidentModel& model, uint32_t chosen_token_id,
                              const std::vector<float>& kv_scratch) {
-    // kv_scratch carries the K/V values computed for this token during step().
-    // The caller is responsible for providing the correct scratch buffer.
-    // If kv_scratch is empty, we have no K/V to write — throw loudly.
+
     if (kv_scratch.empty()) {
         throw std::runtime_error(
             "GenerationStep::append — kv_scratch is empty. "
@@ -364,14 +291,11 @@ void GenerationStep::append(ResidentModel& model, uint32_t chosen_token_id,
             "' not found. Ensure the pool was committed before generation.");
     }
 
-    // Write K/V at position kv_position.
-    // The pool layout is: [token][layer][K: n_kv_heads*head_dim][V: n_kv_heads*head_dim]
-    // kv_scratch carries all layers' K/V for this token in that layout.
     const PoolStat stat = pool_.stat(model.kv_pool_name);
     const uint64_t pos  = model.kv_position;
 
     if (pos >= stat.token_capacity) {
-        // Pool needs to grow before we can write.
+
         const uint64_t new_cap = stat.token_capacity + (stat.token_capacity / 2) + 64;
         if (!pool_.grow(model.kv_pool_name, new_cap)) {
             throw std::runtime_error(
@@ -389,10 +313,6 @@ void GenerationStep::append(ResidentModel& model, uint32_t chosen_token_id,
     ++model.kv_position;
 }
 
-// ---------------------------------------------------------------------------
-// KernelDescriptor builder
-// ---------------------------------------------------------------------------
-
 KernelDescriptor GenerationStep::make_descriptor(const ResidentModel& model,
                                                   KernelType type) const {
     KernelDescriptor desc;
@@ -402,10 +322,6 @@ KernelDescriptor GenerationStep::make_descriptor(const ResidentModel& model,
     desc.capability_flags = CAP_NONE;
     return desc;
 }
-
-// ---------------------------------------------------------------------------
-// KV region binding builder
-// ---------------------------------------------------------------------------
 
 KvRegionBinding GenerationStep::make_kv_binding(const ResidentModel& model,
                                                   uint32_t layer) const {
@@ -417,14 +333,9 @@ KvRegionBinding GenerationStep::make_kv_binding(const ResidentModel& model,
 
     const PoolStat stat = pool_.stat(model.kv_pool_name);
 
-    // KV layout per token in the pool:
-    //   [layer 0 K: n_kv_heads*head_dim f16][layer 0 V: n_kv_heads*head_dim f16]
-    //   [layer 1 K: ...][layer 1 V: ...]
-    //   ...
-    // The byte offsets for layer i's K and V within one token's bytes_per_token span.
-    const uint64_t kv_elem_bytes   = 2; // f16
+    const uint64_t kv_elem_bytes   = 2;
     const uint64_t kv_head_dim_bytes = (uint64_t)model.n_kv_heads * model.head_dim * kv_elem_bytes;
-    const uint64_t layer_stride    = kv_head_dim_bytes * 2; // K + V per layer
+    const uint64_t layer_stride    = kv_head_dim_bytes * 2;
     const uint64_t k_offset        = layer * layer_stride;
     const uint64_t v_offset        = k_offset + kv_head_dim_bytes;
 
@@ -434,16 +345,12 @@ KvRegionBinding GenerationStep::make_kv_binding(const ResidentModel& model,
     binding.k_byte_offset    = k_offset;
     binding.v_byte_offset    = v_offset;
     binding.kv_dtype         = DType::F16;
-    binding.tail_snapshot    = model.kv_position; // tokens currently in pool
-    binding.visibility_bitmap = nullptr;           // no tombstones in basic generation
+    binding.tail_snapshot    = model.kv_position;
+    binding.visibility_bitmap = nullptr;
     binding.bitmap_len_tokens = 0;
 
     return binding;
 }
-
-// ---------------------------------------------------------------------------
-// Canonical projection (called by fusion loop via friend access)
-// ---------------------------------------------------------------------------
 
 void GenerationStep::project_to_canonical(
     const std::vector<float>& native_logits,
@@ -457,23 +364,11 @@ void GenerationStep::project_to_canonical(
     for (uint32_t native_id = 0; native_id < (uint32_t)native_logits.size(); ++native_id) {
         const CanonicalId cid = vocab_union.to_canonical(model.tokenizer_model, native_id);
         if (cid == CANONICAL_UNKNOWN) continue;
-        // When two native tokens map to the same canonical id (rare but
-        // possible with byte-fallback tokens), take the higher logit.
+
         if (native_logits[native_id] > out_canonical[cid])
             out_canonical[cid] = native_logits[native_id];
     }
 }
-
-// ---------------------------------------------------------------------------
-// Weight resolution helpers
-//
-// These resolve typed pointers from WeightRegion tensor descriptors. They
-// find the named tensor in the region's tensor list and return a typed pointer
-// to its data. These are called per-layer during the forward pass; they do
-// linear searches over the tensor list. At batch size 1 this is not the
-// bottleneck. A layer-indexed cache could be added if profiling shows
-// otherwise — do not optimise prematurely.
-// ---------------------------------------------------------------------------
 
 const float* GenerationStep::resolve_norm_weight(const WeightRegion* region,
                                                    const char* role,
@@ -503,34 +398,16 @@ const float* GenerationStep::resolve_final_norm_weight(const WeightRegion* regio
     throw std::runtime_error("GenerationStep: 'output_norm.weight' not found");
 }
 
-// ---------------------------------------------------------------------------
-// Q/K/V projection, attention output projection, output projection
-//
-// These are inline f32 matmuls for the reference path. The ISA path will
-// fuse these with the kernel dispatches; for now they live here as simple
-// loops so the correctness of the layer sequence can be validated end-to-end
-// without waiting for a fused kernel implementation.
-//
-// project_qkv:      norm_out [D] x Wq/Wk/Wv [D, H*HD] -> q_buf [H*HD]
-//                   K and V are also projected here and stored in kv_scratch
-//                   which the caller passes to append().
-// project_attn_out: attn_out [H*HD] x Wo [H*HD, D] -> residual add into x[D]
-// project_output:   final_norm_out [D] x Wout [D, vocab_size] -> logits[vocab_size]
-// ---------------------------------------------------------------------------
-
 void GenerationStep::project_qkv(const float* x, const WeightRegion* qkv_region,
                                    float* q_out, uint32_t D, uint32_t H, uint32_t HD,
                                    const ResidentModel& model, uint32_t layer) {
-    // Resolve Q, K, V tensors by name from the region.
-    // Fused QKV tensor ("attn_qkv.weight") is checked first; if absent,
-    // separate Q/K/V tensors are used.
+
     const std::string prefix = "blk." + std::to_string(layer) + ".";
     const TensorDesc* Wq = nullptr;
 
     for (const TensorDesc& t : qkv_region->tensors) {
         if (t.name == prefix + "attn_qkv.weight") {
-            // Fused QKV: layout is [Q rows | K rows | V rows], each [H*HD, D].
-            // Q occupies the first H*HD rows.
+
             const float* W = static_cast<const float*>(t.data);
             for (uint32_t o = 0; o < H * HD; ++o) {
                 float acc = 0.0f;
@@ -550,7 +427,6 @@ void GenerationStep::project_qkv(const float* x, const WeightRegion* qkv_region,
             "or '" + prefix + "attn_qkv.weight'");
     }
 
-    // Separate Q tensor.
     const float* W = static_cast<const float*>(Wq->data);
     for (uint32_t o = 0; o < H * HD; ++o) {
         float acc = 0.0f;
@@ -558,10 +434,7 @@ void GenerationStep::project_qkv(const float* x, const WeightRegion* qkv_region,
             acc += x[i] * W[o * D + i];
         q_out[o] = acc;
     }
-    // K and V are projected and written to the KV pool by append() — they are
-    // resolved there from "attn_k.weight" and "attn_v.weight". The attention
-    // kernel reads K/V from the pool (prior tokens' K/V were written by prior
-    // append() calls); the new token's K/V are written after sampling.
+
 }
 
 void GenerationStep::project_attn_out(const float* attn_out,
@@ -572,13 +445,12 @@ void GenerationStep::project_attn_out(const float* attn_out,
     for (const TensorDesc& t : wo_region->tensors) {
         if (t.name == name) {
             const float* W = static_cast<const float*>(t.data);
-            // Wo is [D, H*HD]: output[d] = sum_o(attn_out[o] * W[d*H*HD + o])
-            // Then add residual: x[d] += output[d]
+
             for (uint32_t d = 0; d < D; ++d) {
                 float acc = 0.0f;
                 for (uint32_t o = 0; o < H * HD; ++o)
                     acc += attn_out[o] * W[d * (H * HD) + o];
-                x[d] += acc;  // residual add in place
+                x[d] += acc;
             }
             return;
         }
@@ -594,7 +466,7 @@ void GenerationStep::project_output(const float* norm_out,
     for (const TensorDesc& t : out_region->tensors) {
         if (t.name == "output.weight") {
             const float* W = static_cast<const float*>(t.data);
-            // W is [vocab_size, D]: logits[v] = sum_d(norm_out[d] * W[v*D + d])
+
             for (uint32_t v = 0; v < vocab_size; ++v) {
                 float acc = 0.0f;
                 for (uint32_t d = 0; d < D; ++d)
@@ -608,4 +480,4 @@ void GenerationStep::project_output(const float* norm_out,
         "GenerationStep: output projection tensor 'output.weight' not found");
 }
 
-} // namespace prime
+}

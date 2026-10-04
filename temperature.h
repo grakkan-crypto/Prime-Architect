@@ -207,39 +207,29 @@
 
 #pragma once
 
-#include "live_registry.h"      // LiveTemperature: the shape of one row
+#include "live_registry.h"
 
 #include <string>
 #include <vector>
 
 namespace prime {
 
-// Departments whose agents get a control at all. Every other agent is
-// deterministic: no control, no stored value, no row. Handed to the naming
-// service as-is.
 inline const std::vector<std::string> kTemperatureDepartments = {
     "Adept", "Artist", "Artisan", "Aperture", "Architect",
 };
 
-// Architect is whitelisted by department but gated to this one member.
 inline constexpr const char* kTemperatureArchitectMember = "Architect-Ingest";
 
 inline constexpr double      kTemperatureDefault    = 0.7;
 inline constexpr const char* kTemperatureFileSuffix = "-temp.bin";
 
-// ---- what crosses the UI boundary (Ruling 12) ---------------------------------
-
-// An open Edit session: the rows with their path attached, and the
-// eligibility worked out beside them. The Host edits `entries` in place —
-// one copy, this one. `expected` is description only.
 struct TemperatureSession {
     std::string                   pipeline;
-    std::string                   path;      // where `entries` came from and go back to
-    std::vector<LiveTemperature>  entries;   // reconciled: every expected row, plus every saved row nobody expected
-    std::vector<LiveTemperature>  expected;  // who should have a value, at default
+    std::string                   path;
+    std::vector<LiveTemperature>  entries;
+    std::vector<LiveTemperature>  expected;
 };
 
-// ---- the mechanism ----------------------------------------------------------
 class Temperature {
 public:
     Temperature() = default;
@@ -247,35 +237,23 @@ public:
     Temperature(const Temperature&)            = delete;
     Temperature& operator=(const Temperature&) = delete;
 
-    // This file's standing declaration of the payload categories it needs
-    // (payload_categories vocabulary). Data, read directly by whoever hands
-    // the payload over.
     static const std::vector<std::string> declared_needs;
 
-    // The two things that can follow reconciliation. The branch is data
-    // handed to the one operation, not two operations.
     enum class Branch { Load, Edit };
 
-    // THE ONE DOCKED OPERATION. Docks, asks the naming service, reads the
-    // config, works out the expected set, reads the file, reconciles, then
-    // branches (Ruling 10). Nothing is handed back; what an Edit session
-    // holds is reached through held().
     void dock(const std::string& pipeline_name,
               const std::vector<std::string>& roster,
               Branch branch);
 
-    // What the open Edit session holds. Empty when no session is open.
     TemperatureSession& held();
 
-    // SAVE (Ruling 11).
     void save();
 
-    // CANCEL. What is held is gone. Nothing is written anywhere.
     void cancel();
 
 private:
-    // Held only for the open duration of an Edit session.
+
     TemperatureSession held_;
 };
 
-} // namespace prime
+}

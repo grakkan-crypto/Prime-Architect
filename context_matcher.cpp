@@ -31,42 +31,30 @@ bool Masking_Link(const std::vector<std::string>& prompt_ids,
 bool Masking_Unlink(const std::vector<std::string>& prompt_ids,
                     const std::vector<std::string>& pool_ids);
 
-} // namespace prime
+}
 
 namespace prime {
 
 namespace {
 
-// The input pools the matching serves, by registry name (coder.cpp).
 constexpr const char* kInputPools[] = { "ANALYST_INPUT", "ADEPT_INPUT" };
 
-// The map key: taken before the first visit of the session, held.
 bool   has_key = false;
 MapKey key;
 
-// The prompt ID being evaluated.
 std::string held;
 
-// The prompt agents: every agent with write access on an input pool. Held
-// for the pipeline's lifespan.
 std::vector<std::string> prompt_agents;
 
-// One pool's lifts in the evaluation: its most recent, oldest first, and the
-// sum and count of all of them.
 struct Track {
     std::deque<float> recent;
     double            sum   = 0.0;
     std::uint64_t     count = 0;
 };
 
-// Each pool's lifts, and the pools noted against the held prompt ID.
 std::map<std::string, Track> tracks;
 std::vector<std::string>     noted;
 
-// The evaluation's thresholds. A pool qualifies once it has kSettle recent
-// lifts and either their mean reaches kSustained, or at least kStandoutHits
-// of its last kStandoutWindow lifts reach kStandout. A noted pool is taken
-// off once the mean of all its lifts is below kBackground.
 constexpr std::size_t kSettle         = 8;
 constexpr std::size_t kWindow         = 16;
 constexpr float       kSustained      = 2.5f;
@@ -75,7 +63,7 @@ constexpr std::size_t kStandoutWindow = 8;
 constexpr std::size_t kStandoutHits   = 3;
 constexpr double      kBackground     = 1.0;
 
-} // namespace
+}
 
 void ContextMatcher_Watch() {
     prompt_agents.clear();
@@ -190,4 +178,4 @@ void ContextMatcher_Release(const std::vector<std::string>& prompt_ids) {
     for (const std::string& id : prompt_ids) live_registry().unlink_prompt(id);
 }
 
-} // namespace prime
+}

@@ -101,12 +101,8 @@
 
 namespace prime::pipelines::coder {
 
-// The pipeline's identity. Stated here once; the caller hands it to
-// PipelineLoader alongside pipeline() and nowhere else states it.
 inline constexpr const char* kPipelineName = "Coder";
 
-// THE ONE FUNCTION — the PipelineFn PipelineLoader runs. Bare wake in;
-// payload out; ProjectIngest woken inside, invisibly to the caller.
 PipelinePayload pipeline();
 
-} // namespace prime::pipelines::coder
+}

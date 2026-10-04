@@ -47,19 +47,15 @@
 namespace prime {
 
 struct AgentEntry {
-    std::string id;              // immutable, e.g. "manual_4e91d9"
-    std::string name;            // addressable key; editable, cascades on change
-    std::string department;      // authoritative role; the folder it belongs to
-    std::string kind = "agent";  // "agent" or "team" — structural kind, the sole
-                                 // discriminator on disk and in the shared
-                                 // entries_ vector. A solo agent entry is always
-                                 // "agent". Replaces the former type + is_team.
-    std::string mapped_path;     // discovered model load_path
-    std::string compute_target;  // "rdna" | "xdna" | "hybrid"; operator-chosen
+    std::string id;
+    std::string name;
+    std::string department;
+    std::string kind = "agent";
+
+    std::string mapped_path;
+    std::string compute_target;
 };
 
-// A model offered to an agent for assignment, carrying its origin department so
-// a cross-department text candidate shows where it actually came from.
 struct ModelChoice {
     std::string name;
     std::string load_path;
@@ -68,52 +64,36 @@ struct ModelChoice {
 
 class AgentConfig {
 public:
-    // Replace the working set (e.g. loaded from an existing config on panel open).
+
     void set_entries(std::vector<AgentEntry> entries);
 
     const std::vector<AgentEntry>& entries() const { return entries_; }
 
-    // Solo agents in one department, in insertion order.
     std::vector<AgentEntry> in_department(const std::string& department) const;
 
-    // Create a new solo agent in a department. id is minted immutable. name must
-    // be unique across all addressable names; uniqueness enforcement is the
-    // caller's contract against the combined agent+team namespace. Returns the
-    // created entry.
     AgentEntry create_agent(const std::string& name,
                             const std::string& department,
                             const std::string& mapped_path,
                             const std::string& compute_target);
 
-    // Edit assignable fields of an existing agent by id. Does NOT rename — name
-    // changes go through rename_agent so the cascade contract is explicit.
     bool edit_agent(const std::string& id,
                     const std::string& mapped_path,
                     const std::string& compute_target);
 
-    // Rename an agent by id and report BOTH names so the caller can cascade the
-    // change into every team roster referencing the old name. Returns nullopt if
-    // the id is unknown or the new name collides. On success the agent's name is
-    // updated in place; propagating {old_name -> new_name} into team rosters is
-    // the caller's responsibility, performed atomically with this call.
     struct RenameResult { std::string old_name; std::string new_name; };
     std::optional<RenameResult> rename_agent(const std::string& id,
                                              const std::string& new_name);
 
     bool delete_agent(const std::string& id);
 
-    // The models an agent in `department` may be assigned, applying the
-    // specialised-vs-text visibility rule. `discovered` is the flat loadable set
-    // from ModelDiscovery (Malformed already excluded upstream, or ignored here).
     std::vector<ModelChoice>
     assignable_models(const std::string& department,
                       const std::vector<struct DiscoveredModel>& discovered) const;
 
-    // True if `department` is a specialised (single-folder) modality department.
     static bool is_specialised_department(const std::string& department);
 
 private:
     std::vector<AgentEntry> entries_;
 };
 
-} // namespace prime
+}

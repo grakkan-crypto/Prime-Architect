@@ -15,7 +15,7 @@ void ProjectState::set_pipeline(const std::string& pipeline_name,
 void ProjectState::open_project(const std::string& name, const std::string& path,
                                 bool read_only) {
     project_ = ActiveProject{name, path, read_only};
-    file_buffer_.reset(); // a newly-opened project has no buffer until loaded
+    file_buffer_.reset();
 }
 
 void ProjectState::set_file_buffer(std::string content) {
@@ -34,4 +34,4 @@ void ProjectState::clear() {
     file_buffer_.reset();
 }
 
-} // namespace prime::frontend
+}

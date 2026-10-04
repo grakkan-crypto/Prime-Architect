@@ -47,23 +47,17 @@
 namespace prime {
 
 struct LayoutTab {
-    // Which pipeline this tab addresses. The lookup key for everything the tab
-    // needs — its roster, its rules, its temperatures. Never a copy of any of
-    // those, just the name to look them up by.
+
     std::string pipeline;
 
-    // The sub-heading above the activity bar. Empty means no indicator, which
-    // means no bar is drawn — some pipelines legitimately have nothing to show
-    // there, and an empty track would imply something was missing.
     std::string indicator;
 };
 
 class LayoutTabs {
 public:
-    // Open a tab for a pipeline. Returns its index.
+
     size_t open(const std::string& pipeline, const std::string& indicator = "");
 
-    // Close by index. Returns false if out of range.
     bool close(size_t index);
 
     void select(size_t index);
@@ -77,8 +71,6 @@ public:
     const LayoutTab* active() const;
     LayoutTab*       active();
 
-    // The active tab's pipeline — the key everything else reads. Empty when no
-    // tab is open.
     std::string active_pipeline() const;
 
     std::string active_indicator() const;
@@ -89,4 +81,4 @@ private:
     size_t                 active_ = 0;
 };
 
-} // namespace prime
+}

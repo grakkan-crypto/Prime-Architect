@@ -226,4 +226,4 @@ private:
 
 PoolMaintenance& pool_maintenance();
 
-} // namespace prime
+}

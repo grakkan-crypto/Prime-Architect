@@ -42,37 +42,28 @@
 
 namespace prime {
 
-// Canonical token id — the union-space id shared across all models in a fusion.
 using CanonicalId = uint32_t;
-constexpr CanonicalId CANONICAL_UNKNOWN = 0; // reserved; unknown tokens map here
+constexpr CanonicalId CANONICAL_UNKNOWN = 0;
 
-// Per-model translation tables — built once, queried at generation time.
 struct ModelTranslation {
-    std::string              source_path;       // the GGUF file this covers
-    std::vector<CanonicalId> native_to_canon;   // index == native token id
-    std::vector<uint32_t>    canon_to_native;   // index == canonical id; 0 == unknown
+    std::string              source_path;
+    std::vector<CanonicalId> native_to_canon;
+    std::vector<uint32_t>    canon_to_native;
 };
 
-// The compiled union for one pipeline. Immutable after construction.
 class VocabUnion {
 public:
-    // Number of distinct tokens in the canonical space (including UNKNOWN at 0).
+
     uint32_t canonical_size() const { return static_cast<uint32_t>(canon_to_text_.size()); }
 
-    // Translate a native token id from a specific model into canonical space.
     CanonicalId to_canonical(const std::string& source_path, uint32_t native_id) const;
 
-    // Translate a canonical id back to a native id for a specific model.
-    // Returns 0 (UNKNOWN) if the canonical token has no equivalent in that model.
     uint32_t to_native(const std::string& source_path, CanonicalId canon_id) const;
 
-    // The text string for a canonical id. Empty string for UNKNOWN.
     const std::string& canonical_text(CanonicalId id) const;
 
-    // Whether a canonical token has a native equivalent in a given model.
     bool is_known(const std::string& source_path, CanonicalId canon_id) const;
 
-    // All source paths in this union.
     std::vector<std::string> members() const;
 
 private:
@@ -80,16 +71,13 @@ private:
 
     std::vector<std::string>                             canon_to_text_;
     std::unordered_map<std::string, ModelTranslation>    by_path_;
-    std::string                                          empty_; // returned for UNKNOWN text
+    std::string                                          empty_;
 };
 
-// The compiler. Stateless — each build() call produces a fresh VocabUnion.
-// Called at pool load time with every VocabMap declared for that pipeline.
 class VocabTranslationLayer {
 public:
-    // Build the canonical union from a set of vocab maps. All maps are treated
-    // uniformly regardless of family — same-family pairs are not special-cased.
+
     VocabUnion build(const std::vector<const VocabMap*>& maps) const;
 };
 
-} // namespace prime
+}

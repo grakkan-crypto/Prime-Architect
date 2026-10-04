@@ -25,10 +25,6 @@ const char* google_status_name(GoogleStatus s) {
 
 namespace {
 
-// Fixed protected paths. The old per-request path override existed only because
-// a Command could carry one; with no Command there is no override, and a
-// development account is configured by placing files at these paths.
-// DEFERRED_UPDATES: these map to Prime OS protected paths at migration.
 constexpr const char* kCredentialsPath = "/prime/google/credentials.json";
 constexpr const char* kTokenPath       = "/prime/google/token.json";
 
@@ -50,10 +46,6 @@ TokenState resolve_token_state(const char* path) {
     const std::string contents{std::istreambuf_iterator<char>(f), {}};
     if (contents.empty()) return TokenState::Missing;
 
-    // TODO(google-client): parse real expiry and return Expired when a refresh
-    // is required. Until the client binds, a present token reads as Valid — and
-    // the call still stops at ClientNotBound below, so this cannot produce a
-    // false success on its own.
     return TokenState::Valid;
 }
 
@@ -64,7 +56,7 @@ GoogleOutcome out(GoogleStatus s, std::string detail) {
     return o;
 }
 
-} // namespace
+}
 
 GoogleOutcome google_action(EngineContext&     engine,
                             const std::string& source_agent,
@@ -74,7 +66,6 @@ GoogleOutcome google_action(EngineContext&     engine,
     if (!engine.has_pipeline())
         return out(GoogleStatus::NoPipeline, "no pipeline resident");
 
-    // Department from the registry, not from the caller's name.
     auto caller = engine.slots().by_name(source_agent);
     if (!caller || caller->agent.department != "Analyst")
         return out(GoogleStatus::Denied,
@@ -99,21 +90,15 @@ GoogleOutcome google_action(EngineContext&     engine,
                    "no token present; interactive OAuth consent required");
 
     if (tok == TokenState::Expired) {
-        // TODO(google-client): refresh from the stored refresh token and persist
-        // token.json. On refresh failure this returns AuthRequired for re-consent.
+
         return out(GoogleStatus::AuthRequired,
                    "token expired and no refresh path is bound; re-consent required");
     }
 
-    // ---- Execute ------------------------------------------------------------
-    // INTEGRATION SEAM: the Google client library — the one permitted third-party
-    // dependency for this file. It is not bound. Nothing is executed, and this
-    // says so rather than returning a shaped acknowledgement of a call that never
-    // happened.
     (void)data;
     return out(GoogleStatus::ClientNotBound,
                "credentials resolved for " + service + "." + action +
                "; the Google client library is not bound and nothing was executed");
 }
 
-} // namespace prime
+}

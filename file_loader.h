@@ -240,15 +240,10 @@
 
 namespace prime {
 
-// The three states of a read. Absent and unreadable are DIFFERENT, always: a
-// file that is not there yet is an ordinary state — what everything looks
-// like before anyone has saved anything. A file that IS there and cannot be
-// read is a real failure. Returning empty for both would let unreadable
-// content silently present as "nothing saved yet".
 enum class FileRead {
     Ok,
-    Absent,      // not there yet — ordinary
-    Unreadable,  // there, and could not be read — a real failure
+    Absent,
+    Unreadable,
 };
 
 // ===========================================================================
@@ -301,21 +296,11 @@ void identity_table_undock(const LayerId& id);
 // ===========================================================================
 std::string docked_layer_path();
 
-// ---------------------------------------------------------------------------
-// The disk mechanics, as handed to executing content. These are Loader's
-// own capabilities — the same read and save, made callable from inside an
-// entry's content so that every disk touch the content directs still
-// happens by Loader's hands. Only Loader constructs this; no code reaches
-// disk without being inside a docking that minted an identity for it.
-// ---------------------------------------------------------------------------
 class Disk {
 public:
-    // Three attempts, then the outcome stands. Absent is never retried.
-    // Carries this docking's identity, attached by Loader.
+
     FileRead read(const std::string& path, std::string& out) const;
 
-    // The staged atomic write, under this docking's identity, attached by
-    // Loader. Content supplies nothing and sees nothing.
     bool save(const std::string& path, const std::string& text) const;
 
 private:
@@ -324,19 +309,11 @@ private:
     friend class FileLoader;
 };
 
-// What one entry's content states about its own run. The failure wording
-// is built by the content, at the point of failure, from what it already
-// holds — this file adds nothing to it.
 struct EntryOutcome {
     bool        ok = false;
-    std::string failure;   // populated only when ok == false
+    std::string failure;
 };
 
-// One entry: one self-contained piece of Layer-authored content. Handed
-// the disk mechanics and nothing else; everything further it needs was
-// bound into it when the Layer built it. A request carrying no entries at
-// all is a stated failure — a Layer is fully formed and plug-and-play; it
-// always has content.
 using EntryFn = std::function<EntryOutcome(const Disk&)>;
 
 struct LoadEntry {
@@ -347,22 +324,20 @@ struct LoadRequest {
     std::vector<LoadEntry> entries;
 };
 
-// What Loader itself knows about one entry's run.
 struct EntryReport {
     bool        ok = false;
     std::string failure;
 };
 
 struct LoaderReport {
-    bool                     ok = false;  // every entry completed
-    std::string              failure;     // the first failing entry's reason
-    std::vector<EntryReport> entries;     // one per request entry, in order
+    bool                     ok = false;
+    std::string              failure;
+    std::vector<EntryReport> entries;
 };
 
-// What Loader itself knows about one save docking's run.
 struct SaveReport {
     bool        ok = false;
-    std::string failure;   // populated only when ok == false
+    std::string failure;
 };
 
 class FileLoader {
@@ -372,71 +347,30 @@ public:
     FileLoader(const FileLoader&)            = delete;
     FileLoader& operator=(const FileLoader&) = delete;
 
-    // THE LOAD DOOR — one docking. Loader mints this docking's identity,
-    // logs its row, attaches the identity to the disposable content it was
-    // handed, and executes that content — every entry in parallel. Entries
-    // are independent; what happened to each is stated per entry. The
-    // docking ends when this call ends — however it ends — and the row and
-    // the identity end with it. Whatever this returns goes to the exact
-    // stack frame that called it, once, and is held nowhere inside this
-    // file.
     LoaderReport load(const LoadRequest& request);
 
-    // THE SAVE DOOR — one docking, standing on its own beside load. For a
-    // Layer whose content is already fully formed and only needs writing:
-    // no content is executed, nothing is faked to get here. The same
-    // minting, the same row, the same one identity for the docking's
-    // duration, the same staged write by Loader's own hands, the same
-    // erase when the call ends.
     SaveReport save(const std::string& path, const std::string& text);
 };
 
-// ---------------------------------------------------------------------------
-// Scanning the structured text — the Loader's generic toolkit.
-//
-// ONE implementation of the shape this system writes everywhere it writes
-// text: quoted names, values after a colon, braces grouping a record,
-// brackets grouping a list. Every configuration that parses that shape
-// (Rules, Directives) calls THESE — nothing keeps its own copy, because a
-// second copy of the same scanning is a second thing that can disagree
-// about what a file means. Deliberately literal: they find what is named
-// and report when it is not there, and they do not try to be a general
-// parser — the files are small and this system wrote every one of them.
-// ---------------------------------------------------------------------------
-
-// The span of text between a matching pair of brackets or braces, starting
-// from the first one at or after `from`. Returns false if the pair is not
-// found or does not close.
 bool find_block(const std::string& text, size_t from,
                 char open_ch, char close_ch,
                 size_t& begin_out, size_t& end_out);
 
-// The string value of a named field within [begin, end). Unescapes as it
-// extracts. Returns false when the name is not present in that range.
 bool read_string_field(const std::string& text, size_t begin, size_t end,
                        const std::string& name, std::string& out);
 
-// The numeric value of a named field within [begin, end).
 bool read_number_field(const std::string& text, size_t begin, size_t end,
                        const std::string& name, double& out);
 
-// The boolean value of a named field within [begin, end).
 bool read_bool_field(const std::string& text, size_t begin, size_t end,
                      const std::string& name, bool& out);
 
-// Every quoted string inside the list named `name` within [begin, end).
-// Returns false when the named list is not present; an empty list is Ok
-// with an empty result.
 bool read_string_list(const std::string& text, size_t begin, size_t end,
                       const std::string& name, std::vector<std::string>& out);
 
-// Every quoted name that begins a record inside the object spanning
-// [begin, end) — used to discover buckets without any list of them being
-// maintained anywhere. The file's own contents are the list.
 std::vector<std::string> read_object_keys(const std::string& text,
                                           size_t begin, size_t end);
 
-// Escape a string for writing back out.
 std::string escape_text(const std::string& s);
 
-} // namespace prime
+}

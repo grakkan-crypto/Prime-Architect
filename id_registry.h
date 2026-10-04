@@ -114,31 +114,29 @@
 
 namespace prime::rag {
 
-class RagPersistence; // boundary, see rag_persistence.h
+class RagPersistence;
 
-// Fixed IDs of the seeded system entries. Fixed because they are seeded before
-// any Author minting can occur, so their positions are structural, not magic.
 namespace reserved {
-    inline constexpr uint16_t kDeleted    = 0x0000; // hardcoded store behaviour
-    inline constexpr uint16_t kExpired    = 0x0001; // hardcoded watchdog target
-    inline constexpr uint16_t kSuperseded = 0x0002; // rides through
-    inline constexpr uint16_t kFailed     = 0x0003; // failure-recall anchor tag
-    inline constexpr uint16_t kCallback   = 0x0004; // personalisation anchor tag
+    inline constexpr uint16_t kDeleted    = 0x0000;
+    inline constexpr uint16_t kExpired    = 0x0001;
+    inline constexpr uint16_t kSuperseded = 0x0002;
+    inline constexpr uint16_t kFailed     = 0x0003;
+    inline constexpr uint16_t kCallback   = 0x0004;
     inline constexpr uint16_t kFirstMintable = 0x0005;
 }
 
 enum class ConceptKind : uint8_t {
-    Referent = 0, // exists independent of the axes — never evaluated
-    Reading  = 1, // made of axis material — flagged for evaluation at mint
+    Referent = 0,
+    Reading  = 1,
 };
 
 struct RegistryEntry {
     uint16_t    id = 0;
-    std::string label;          // the word it was minted under
-    std::vector<std::string> synonyms; // further doors onto the same concept
+    std::string label;
+    std::vector<std::string> synonyms;
     ConceptKind kind = ConceptKind::Referent;
-    bool        evaluated = false;      // Readings only; Referents are born true
-    std::vector<uint16_t> related;      // thesaurus cross-references (joy<->glee)
+    bool        evaluated = false;
+    std::vector<uint16_t> related;
 
     bool carries_word(const std::string& w) const {
         if (label == w) return true;
@@ -147,29 +145,14 @@ struct RegistryEntry {
     }
 };
 
-// The outcome of an attempted mint. Four honest shapes, never confusable:
-//   minted      — new address taken.
-//   challenged  — mint HELD: a collision exists. NOTHING about the colliding
-//                 concept is revealed (the challenge is blind). The Author
-//                 answers through mint_resolve_blind with its own synonyms.
-//   matched     — (from mint_resolve_blind) the blind test intersected: this
-//                 is an existing concept; `matched` names the reuse target(s),
-//                 revealed only now, after the test. Not an error — a verdict.
-//   refused     — `refusal` says why (empty label, enrichment open, space
-//                 exhausted, persistence, resolve without a collision).
 struct MintResult {
     bool        minted = false;
-    uint16_t    id = 0;          // valid only when minted
+    uint16_t    id = 0;
     bool        challenged = false;
-    std::vector<uint16_t> matched; // blind-test verdict: reuse these instead
-    std::string refusal;         // non-empty only when refused
+    std::vector<uint16_t> matched;
+    std::string refusal;
 };
 
-// The outcome of attaching a synonym. A word other concepts carry holds the
-// attach until confirmed via add_synonym_confirm, acknowledging the exact
-// holders. (The synonym door keeps the acknowledge form: here the Author is
-// enriching a concept whose entry it is looking at by necessity — a blind
-// exchange is not meaningful at this door.)
 struct SynonymResult {
     bool        added = false;
     bool        challenged = false;
@@ -177,9 +160,6 @@ struct SynonymResult {
     std::string refusal;
 };
 
-// A word carried by more than one concept — the derived review list. Derived
-// on demand from the entries themselves: one copy of the truth, nothing
-// stored that could drift against it.
 struct WordCollision {
     std::string word;
     std::vector<uint16_t> concept_ids;
@@ -189,74 +169,32 @@ class IdRegistry {
 public:
     IdRegistry() = default;
 
-    // Attach the persistence boundary and load whatever it holds. An empty
-    // registry gets the reserved system entries seeded (and persisted).
-    // Returns false with reason_out set if the backing store exists but cannot
-    // be read — which is a real failure, never presented as "nothing yet".
     bool open(RagPersistence& persistence, std::string& reason_out);
 
-    // DECLARED in-memory operation for the interim before the OS-pending
-    // persistence exists. Seeds the reserved entries; nothing survives the
-    // process. This is an explicit mode the caller chose, never a fallback
-    // the registry slid into — open() failing does NOT route here.
     bool open_in_memory(std::string& reason_out);
 
-    // THE ONE DOOR — step one. Refused while another concept's enrichment is
-    // open (serialized minting: finish the entry, then mint the next). A
-    // word collision HOLDS the mint blind — the result says only that a
-    // collision exists, revealing nothing. No collision: minted, and
-    // enrichment opens on the new concept.
     MintResult mint(const std::string& label, ConceptKind kind);
 
-    // THE ONE DOOR — the blind resolve. The Author, dictionary-blocked,
-    // supplies its own synonyms for what it means. Pure exact-string set
-    // intersection against every colliding concept's word set decides:
-    //   intersect  -> not minted; `matched` reveals the reuse target(s).
-    //   disjoint   -> minted as genuinely new; enrichment opens.
-    // Refused if the word has no collision (use mint()), if the offered set
-    // is empty (an empty signature tests nothing and would pass vacuously —
-    // that is a hole, not a pass), or while enrichment is open elsewhere.
     MintResult mint_resolve_blind(const std::string& label, ConceptKind kind,
                                   const std::vector<std::string>& offered_synonyms);
 
-    // Close the open concept's enrichment: the Author declares its synonym
-    // set exhausted. Only then may the next mint proceed. Refused if `id` is
-    // not the concept currently open.
     bool complete_enrichment(uint16_t id, std::string& reason_out);
     std::optional<uint16_t> enrichment_open() const { return enrichment_open_; }
 
-    // Downtime enrichment: attach a surface word. Acknowledge-gated on
-    // cross-concept collision (see SynonymResult). Refused unconditionally
-    // if the concept already carries the word or is unknown.
     SynonymResult add_synonym(uint16_t id, const std::string& word);
     SynonymResult add_synonym_confirm(uint16_t id, const std::string& word,
                                       const std::vector<uint16_t>& acknowledged);
 
-    // THE THESAURUS READ. Every concept this word opens onto — label or
-    // synonym, one entry or several (homonyms). The reader takes all of them
-    // and judges from context which applies, exactly as a thesaurus is read.
     std::vector<uint16_t> concepts_for(const std::string& word) const;
 
     const RegistryEntry* get(uint16_t id) const;
 
-    // Oversight list: every word currently sitting under more than one
-    // concept. Because the challenge gate means multi-concept words can only
-    // exist through an explicit confirmation, everything here was
-    // deliberately confirmed — this is the record of those decisions, derived
-    // fresh each call from the entries themselves. One copy of the truth.
     std::vector<WordCollision> word_collisions() const;
 
-    // Downtime evaluation outcome: two EXISTING concepts are related
-    // (thesaurus link). Symmetric — recorded on both. Refused with reason if
-    // either ID is unknown. This is the ONLY write evaluation ever performs.
     bool relate(uint16_t a, uint16_t b, std::string& reason_out);
 
-    // Mark a Reading's evaluation complete. Refused on a Referent (nothing to
-    // evaluate) and on an unknown ID.
     bool mark_evaluated(uint16_t id, std::string& reason_out);
 
-    // The Author's idle-work queue: every Reading not yet evaluated, oldest
-    // first (mint order — nothing cleverer was agreed).
     std::vector<uint16_t> pending_evaluation() const;
 
     size_t count() const { return entries_.size(); }
@@ -271,18 +209,12 @@ private:
     SynonymResult synonym_write(uint16_t id, const std::string& word);
     static bool   same_id_set(std::vector<uint16_t> a, std::vector<uint16_t> b);
 
-    // The one concept whose enrichment is open. Serializes minting.
-    // NOT yet persisted — after a cold load no enrichment is open; whether
-    // that state should survive restart is a persistence-format question
-    // parked with the format itself (see pending spec).
     std::optional<uint16_t> enrichment_open_;
 
-    std::vector<RegistryEntry> entries_;   // index != id is impossible: ids are
-                                           // sequential from 0, so entries_[id]
-                                           // IS the entry. One copy, no map to
-                                           // drift against it.
+    std::vector<RegistryEntry> entries_;
+
     RagPersistence* persistence_ = nullptr;
     bool open_ = false;
 };
 
-} // namespace prime::rag
+}

@@ -54,38 +54,23 @@ namespace prime {
 
 class MemoryAllocator {
 public:
-    // commit_ceiling — hard cap on live bytes across every pool. Physical VRAM.
-    //                  The only limit in the system.
+
     explicit MemoryAllocator(uint64_t commit_ceiling);
     ~MemoryAllocator();
 
     MemoryAllocator(const MemoryAllocator&) = delete;
     MemoryAllocator& operator=(const MemoryAllocator&) = delete;
 
-    // Take one block of `block_size` bytes. Returns nullptr when the ceiling
-    // would be breached or the OS refuses — never a smaller block, and never a
-    // block charged past the ceiling. A caller that gets nullptr has genuinely
-    // run out of VRAM and must say so rather than proceed.
-    //
-    // block_size must already be granularity-aligned (round_up_to_granularity).
     uint8_t* acquire(uint64_t block_size);
 
-    // Give one block back. It is returned to the OS and its bytes stop counting
-    // against the ceiling immediately, so another pool can take them on the very
-    // next acquisition. block_size must be the size it was acquired with.
     void release(uint8_t* block, uint64_t block_size);
 
-    // Bytes currently held by live pools. Exact — see the no-cache note.
     uint64_t total_committed() const;
 
     uint64_t commit_ceiling() const { return commit_ceiling_; }
 
-    // The OS allocation granularity. A hardware fact, reported so callers can
-    // size their blocks without guessing at it.
     uint64_t granularity() const { return granularity_; }
 
-    // Smallest granularity-aligned size that holds `bytes`. Never returns 0 for
-    // a non-zero input.
     uint64_t round_up_to_granularity(uint64_t bytes) const;
 
 private:
@@ -95,4 +80,4 @@ private:
     mutable std::mutex mutex_;
 };
 
-} // namespace prime
+}

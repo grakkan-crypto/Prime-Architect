@@ -12,18 +12,6 @@ namespace prime {
 
 namespace {
 
-// ---------------------------------------------------------------------------
-// Direct byte reading and writing.
-//
-// A fixed-size value is written as itself. Anything not fixed size is
-// preceded by its byte length. There is no parser here and nothing to escape:
-// this system wrote the file and reads it back into the same layout.
-//
-// Every read is bounds-checked against what is actually left. A file that
-// runs out mid-record is a hard failure — half a pipeline standing up is
-// worse than none standing up.
-// ---------------------------------------------------------------------------
-
 class Cursor {
 public:
     explicit Cursor(const std::string& buf) : buf_(buf) {}
@@ -100,11 +88,7 @@ std::string directory_of(const std::string& path) {
     return (slash == std::string::npos) ? std::string() : path.substr(0, slash);
 }
 
-} // namespace
-
-// ---------------------------------------------------------------------------
-// Department — derived from the name, never stored
-// ---------------------------------------------------------------------------
+}
 
 std::string LiveRegistry::department_of(const std::string& name) {
     const size_t cut = name.find_first_of("-_");
@@ -123,19 +107,6 @@ bool LiveRegistry::is_temperature_controllable(const std::string& department,
     return false;
 }
 
-// ---------------------------------------------------------------------------
-// WHERE THIS OBJECT'S OWN FILES LIVE
-//
-// *** PLACEHOLDER — SEE DEFERRED_ADDITIONS #11. NOT A REAL ANSWER. ***
-//
-// Deliberately obvious stand-ins. The real layout is not settled and changes
-// again with the OS layer. A plausible-looking wrong path would get trusted
-// and propagate; an obvious one gets fixed.
-//
-// What is NOT placeholder and must not regress: this knowledge lives HERE,
-// in the thing that uses the files. Never a parameter. Never handed in.
-// ---------------------------------------------------------------------------
-
 std::string LiveRegistry::config_file_path() {
     return "PLACEHOLDER_PATH/config.bin";
 }
@@ -143,10 +114,6 @@ std::string LiveRegistry::config_file_path() {
 std::string LiveRegistry::temperature_file_path(const std::string& pipeline_name) {
     return join_path("PLACEHOLDER_PATH", pipeline_name + "-temp.bin");
 }
-
-// ---------------------------------------------------------------------------
-// The one motion
-// ---------------------------------------------------------------------------
 
 ReconcileReport LiveRegistry::load(const std::string& pipeline_name,
                                    const std::vector<std::string>& agent_names) {
@@ -160,7 +127,6 @@ ReconcileReport LiveRegistry::load(const std::string& pipeline_name,
 
     ReconcileReport report;
 
-    // ---- config: agents, teams, split parents, in one read -----------------
     {
         const std::string path = config_file_path();
         std::string blob;
@@ -176,9 +142,6 @@ ReconcileReport LiveRegistry::load(const std::string& pipeline_name,
 
         Cursor c(blob);
 
-        // The config declares EVERY agent that exists anywhere. This pipeline
-        // uses the ones it named. Anything else in the file is not this
-        // pipeline's business and is not held.
         const uint32_t agent_count = c.u32();
         agents_.reserve(agent_names.size());
         for (uint32_t i = 0; i < agent_count; ++i) {
@@ -195,8 +158,6 @@ ReconcileReport LiveRegistry::load(const std::string& pipeline_name,
             agents_.push_back(std::move(a));
         }
 
-        // A pipeline naming an agent the config does not declare is an
-        // integrity failure, not something to quietly run without.
         for (const auto& wanted : agent_names) {
             const bool found =
                 std::any_of(agents_.begin(), agents_.end(),
@@ -221,8 +182,6 @@ ReconcileReport LiveRegistry::load(const std::string& pipeline_name,
             if (t.name.empty())
                 throw std::runtime_error("live_registry: team with no name");
 
-            // A team belongs to this pipeline when every one of its members
-            // does. A team half-inside the fleet is not this pipeline's team.
             const bool mine =
                 !t.roster.empty() &&
                 std::all_of(t.roster.begin(), t.roster.end(),
@@ -258,9 +217,6 @@ ReconcileReport LiveRegistry::load(const std::string& pipeline_name,
         }
     }
 
-    // Every roster member must resolve to a real agent. A roster naming
-    // something that does not exist is an integrity failure, not something to
-    // quietly skip.
     for (const auto& t : teams_) {
         for (const auto& member : t.roster) {
             if (find_agent_locked(member) == nullptr)
@@ -271,14 +227,11 @@ ReconcileReport LiveRegistry::load(const std::string& pipeline_name,
 
     pipeline_name_ = pipeline_name;
 
-    // ---- who SHOULD have a temperature this session -------------------------
-    // Every controllable (team, agent) pair. A controllable agent on no team
-    // is held with an empty team, so it is still authored and still saved.
     std::vector<LiveTemperature> expected;
     std::vector<std::string>     teamed;
 
     for (const auto& t : teams_) {
-        if (!t.parent.empty()) continue;  // duplicates borrow, never author
+        if (!t.parent.empty()) continue;
         for (const auto& member : t.roster) {
             if (!is_temperature_controllable(department_of(member), member)) continue;
             teamed.push_back(member);
@@ -293,11 +246,10 @@ ReconcileReport LiveRegistry::load(const std::string& pipeline_name,
         if (!is_temperature_controllable(department_of(a.name), a.name)) continue;
         if (std::find(teamed.begin(), teamed.end(), a.name) != teamed.end()) continue;
         LiveTemperature e;
-        e.agent = a.name;   // team stays empty
+        e.agent = a.name;
         expected.push_back(std::move(e));
     }
 
-    // ---- the temperature file, reconciled in this same pass ------------------
     std::vector<LiveTemperature> from_file;
     {
         std::string blob;
@@ -318,12 +270,10 @@ ReconcileReport LiveRegistry::load(const std::string& pipeline_name,
                 break;
             }
             case FileRead::Absent:
-                // First run of this pipeline. Ordinary: everything defaults and
-                // the report says so.
+
                 break;
             case FileRead::Unreadable:
-                // There and broken. Reported, and every pair defaults — the
-                // operator is told rather than silently running on defaults.
+
                 report.temperatures_unreadable = true;
                 break;
         }
@@ -370,10 +320,6 @@ void LiveRegistry::clear() {
     temperatures_.clear();
 }
 
-// ---------------------------------------------------------------------------
-// Identity
-// ---------------------------------------------------------------------------
-
 std::string LiveRegistry::pipeline_name() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return pipeline_name_;
@@ -383,10 +329,6 @@ bool LiveRegistry::loaded() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return !pipeline_name_.empty();
 }
-
-// ---------------------------------------------------------------------------
-// Agents
-// ---------------------------------------------------------------------------
 
 const LiveAgent* LiveRegistry::find_agent_locked(const std::string& name) const {
     for (const auto& a : agents_)
@@ -445,10 +387,6 @@ bool LiveRegistry::attach_weights(const std::string& agent_name,
     return false;
 }
 
-// ---------------------------------------------------------------------------
-// Teams
-// ---------------------------------------------------------------------------
-
 const LiveTeam* LiveRegistry::find_team_locked(const std::string& name) const {
     for (const auto& t : teams_)
         if (t.name == name) return &t;
@@ -468,8 +406,7 @@ std::vector<LiveTeam> LiveRegistry::teams() const {
 
 std::vector<std::string>
 LiveRegistry::generating_members_locked(const LiveTeam& t) const {
-    // Functional Arbiter rule: exactly one Arbiter member is the veto seat and
-    // is excluded. Any other count means everyone generates. Never name-based.
+
     int arbiters = 0;
     for (const auto& m : t.roster)
         if (department_of(m) == "Arbiter") ++arbiters;
@@ -506,10 +443,6 @@ std::string LiveRegistry::veto_seat(const std::string& team_name) const {
     return (arbiters == 1) ? found : std::string{};
 }
 
-// ---------------------------------------------------------------------------
-// Split parents
-// ---------------------------------------------------------------------------
-
 std::vector<LiveSplitParent> LiveRegistry::split_parents() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return split_parents_;
@@ -522,10 +455,6 @@ LiveRegistry::split_parent(const std::string& parent_team) const {
         if (s.parent_name == parent_team) return s;
     return std::nullopt;
 }
-
-// ---------------------------------------------------------------------------
-// Temperature
-// ---------------------------------------------------------------------------
 
 std::vector<LiveTemperature> LiveRegistry::temperatures() const {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -591,8 +520,6 @@ bool LiveRegistry::commit_temperatures(const std::vector<LiveTemperature>& edite
     rejected_team_out.clear();
     rejected_agent_out.clear();
 
-    // Validate the whole set BEFORE applying any of it. Nothing is partially
-    // applied, and an out-of-range value is refused rather than clamped.
     for (const auto& e : edited) {
         if (e.value >= temperature_policy::kMin && e.value <= temperature_policy::kMax)
             continue;
@@ -634,15 +561,10 @@ bool LiveRegistry::write_temperatures_locked() const {
     return write_text_file(temperature_file_path(pipeline_name_), blob);
 }
 
-// ---------------------------------------------------------------------------
-// Rebuttal switch — the one switch, and its cascade.
-// ---------------------------------------------------------------------------
-
 void LiveRegistry::set_rebuttal_active(bool active) {
     const bool was = rebuttal_active_.exchange(active, std::memory_order_acq_rel);
-    if (was == active) return; // no change — no signal; recipients assume no change
+    if (was == active) return;
 
-    // Told on change, outside any lock: the switch telling the files.
     std::vector<std::function<void(bool)>> signals;
     {
         std::lock_guard<std::mutex> lock(rebuttal_signal_mutex_);
@@ -659,10 +581,6 @@ void LiveRegistry::on_rebuttal_switch(std::function<void(bool active)> signal) {
     std::lock_guard<std::mutex> lock(rebuttal_signal_mutex_);
     rebuttal_signals_.push_back(std::move(signal));
 }
-
-// ---------------------------------------------------------------------------
-// Prompt links — standing memory, whole-set writes only.
-// ---------------------------------------------------------------------------
 
 void LiveRegistry::link_prompt(const std::string& prompt_id,
                                std::vector<std::string> linked_pool_ids) {
@@ -681,29 +599,13 @@ void LiveRegistry::unlink_prompt(const std::string& prompt_id) {
     prompt_links_.erase(prompt_id);
 }
 
-// ---------------------------------------------------------------------------
-// Class ids — assigned BY THIS REGISTRY, held for the pipeline's lifespan.
-//
-// Shared context is fixed at boot: always id 1, by the named constants below,
-// never assigned and never reassigned. It is a constant precisely because the
-// concept never unloads — the number's meaning is enforced HERE, in the one
-// place responsible for it being true.
-//
-// Everything the pipeline declares is assigned at load, starting from 2, in
-// declared order. The number itself carries no meaning; it only has to stay
-// the same for the pipeline's lifespan, which it does because this registry
-// is the only assigner and it assigns exactly once per load. A pipeline that
-// never declares shared context simply never uses id 1 — nothing else
-// changes and nothing branches on it.
-// ---------------------------------------------------------------------------
-
 void LiveRegistry::assign_class_ids(const std::vector<std::string>& declared) {
     std::lock_guard<std::mutex> lock(class_table_mutex_);
     class_ids_.clear();
-    uint64_t next = kSharedContextClassId + 1; // pipeline assignment starts at 2
+    uint64_t next = kSharedContextClassId + 1;
     for (const auto& name : declared) {
-        if (name == kSharedContextClassName) continue; // fixed at boot, never assigned
-        if (class_ids_.count(name) != 0) continue;     // declared twice: first wins
+        if (name == kSharedContextClassName) continue;
+        if (class_ids_.count(name) != 0) continue;
         class_ids_[name] = next++;
     }
 }
@@ -712,13 +614,8 @@ uint64_t LiveRegistry::class_id_for(const std::string& name) const {
     if (name == kSharedContextClassName) return kSharedContextClassId;
     std::lock_guard<std::mutex> lock(class_table_mutex_);
     auto it = class_ids_.find(name);
-    return it == class_ids_.end() ? 0 : it->second; // 0: not a class here
+    return it == class_ids_.end() ? 0 : it->second;
 }
-
-// ---------------------------------------------------------------------------
-// Class table — direct lookups by class id; absent means refused, never a
-// stand-in.
-// ---------------------------------------------------------------------------
 
 std::optional<uint64_t> LiveRegistry::class_size_bytes_per_token(
         uint64_t class_id) const {
@@ -733,11 +630,6 @@ void LiveRegistry::set_class_size_bytes_per_token(uint64_t class_id,
     std::lock_guard<std::mutex> lock(class_table_mutex_);
     class_sizes_[class_id] = bytes;
 }
-
-// ---------------------------------------------------------------------------
-// Masking state — co-located registry facts and live records; masking.cpp is
-// the logic over these. Declarations in the header's MASKING section.
-// ---------------------------------------------------------------------------
 
 void LiveRegistry::set_mask_pool_facts(const std::string& pool_id,
 bool fixed_no_holder,
@@ -933,4 +825,4 @@ void LiveRegistry::mask_sweep_live() {
     mask_all_covered_ = false;
 }
 
-} // namespace prime
+}

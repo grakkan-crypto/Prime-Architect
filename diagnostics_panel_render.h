@@ -31,4 +31,4 @@ private:
     bool errors_only_ = false;
 };
 
-} // namespace prime
+}

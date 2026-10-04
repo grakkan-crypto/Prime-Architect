@@ -37,13 +37,13 @@ namespace prime {
 class EngineContext;
 
 enum class AetherStatus {
-    Ready,            // sanitised output is resident in the Aether pool
-    Denied,           // caller is not an Analyst-department resident agent
-    NoPipeline,       // nothing resident
-    NoAetherSlot,     // this pipeline has no Aether agent to sanitise with
-    InvalidUrl,       // empty or unusable
-    NetworkNotBound,  // Prime OS network layer absent — no fetch is possible
-    SanitiseFailed    // Aether ran and did not produce usable output
+    Ready,
+    Denied,
+    NoPipeline,
+    NoAetherSlot,
+    InvalidUrl,
+    NetworkNotBound,
+    SanitiseFailed
 };
 
 const char* aether_status_name(AetherStatus s);
@@ -53,14 +53,8 @@ struct AetherOutcome {
     std::string  detail;
 };
 
-// Fetch `url` on behalf of the resident agent `source_agent`, quarantine it, and
-// run the pipeline's Aether agent over it. Returns what happened; never throws,
-// never half-succeeds, never invents content.
-//
-// Every call is written to the Auxiliary audit log — including denials, which
-// are the ones worth having a record of.
 AetherOutcome aether_fetch(EngineContext&     engine,
                            const std::string& source_agent,
                            const std::string& url);
 
-} // namespace prime
+}

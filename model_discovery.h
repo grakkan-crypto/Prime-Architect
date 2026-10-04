@@ -46,30 +46,22 @@
 namespace prime {
 
 enum class ModelKind {
-    SingleGGUF,   // one .gguf file directly in the department folder
-    SplitGGUF,    // subfolder of .gguf parts; load_path is the first part
-    Malformed     // subfolder with no .gguf — reported, not loadable
+    SingleGGUF,
+    SplitGGUF,
+    Malformed
 };
 
 struct DiscoveredModel {
-    std::string name;        // file stem (single) or folder name (split/malformed)
-    std::string department;  // owning department (top-level folder name)
+    std::string name;
+    std::string department;
     ModelKind   kind = ModelKind::SingleGGUF;
 
-    // Absolute path to bind for loading. For SingleGGUF, the file. For SplitGGUF,
-    // the first part by sorted name. Empty for Malformed — nothing to load.
     std::string load_path;
 
-    // The directory the entry was found at (the subfolder for split/malformed,
-    // the file's parent for single). Present for every kind, so a Malformed
-    // entry can point the operator at the folder that failed to classify.
     std::string source_dir;
 
-    // Split models only: number of .gguf parts found. 1 for SingleGGUF, 0 for
-    // Malformed.
     int parts_count = 1;
 
-    // Malformed only: why it could not be classified. Empty otherwise.
     std::string error;
 };
 
@@ -77,36 +69,15 @@ class ModelDiscovery {
 public:
     explicit ModelDiscovery(std::string root_path);
 
-    // Full walk from scratch. Clears prior results and re-reads the disk. Called
-    // on every settings-page open — the walk itself is the mechanism by which
-    // on-disk bloat becomes visible, so it is intentionally uncached.
     void scan();
 
-    // Per-department discovered models, in scan order. Includes Malformed entries.
     const std::unordered_map<std::string, std::vector<DiscoveredModel>>&
         by_department() const { return by_department_; }
 
-    // The authoritative department list for the panel's grouping order (folder
-    // scan order, first-seen). Includes departments with zero loadable models.
-    //
-    // FLAGGED: a folder dropped in here is a new department the instant it's
-    // scanned — but that alone does NOT give it a kernel call. Contract, and
-    // therefore which KernelBackend method it runs through, is resolved by a
-    // fixed, closed list in dispatch.cpp's contract_from_department(), bound
-    // once per agent at pipeline_routes.cpp's bind_fleet(). That list's default
-    // for anything it doesn't name is TextToText — silently. A new department
-    // meant to be a specialist (image, audio, video) that isn't added to
-    // contract_from_department() will bind as an ordinary text agent and never
-    // reach the kernel call it actually needs, with no error anywhere. Adding a
-    // department here is not the whole job; contract_from_department() is the
-    // second half of it, every time.
     std::vector<std::string> departments() const;
 
-    // Includes Malformed entries.
     const std::vector<DiscoveredModel>& all() const { return all_; }
 
-    // Convenience: loadable models (SingleGGUF | SplitGGUF) for one department,
-    // Malformed excluded. Empty vector if the department has none or is unknown.
     std::vector<DiscoveredModel> loadable_for(const std::string& department) const;
 
 private:
@@ -118,4 +89,4 @@ private:
     std::vector<DiscoveredModel> all_;
 };
 
-} // namespace prime
+}

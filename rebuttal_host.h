@@ -47,38 +47,24 @@ public:
     RebuttalHost(const RebuttalHost&)            = delete;
     RebuttalHost& operator=(const RebuttalHost&) = delete;
 
-    // The UI-dismiss door's link — set once at wiring, after both exist.
     void bind(RebuttalTurn& turn) { turn_ = &turn; }
 
-    // One row per rebuttal turn, in creation order.
     void add_row(const std::string& turn_id);
 
-    // Adept-Infer's direct call. An unknown id receives nothing — nothing is
-    // silently invented to hold it.
     void set_subject(const std::string& turn_id, std::string subject);
 
-    // The exchange's user text, retained on the row (not pinned visibly —
-    // reachable via the row's own control once its output finishes).
     void append_input(const std::string& turn_id, std::string text);
 
-    // Bold moves to the next row in creation order, wrapping.
     void advance();
 
-    // Tear the row down. The chat-side door: RebuttalTurn calls this after
-    // reading current_id() — the row's death in the UI, nothing more.
     void remove(const std::string& turn_id);
 
-    // The UI button's door: the row dies HERE first, then RebuttalTurn is
-    // told the id and that it is closed.
     void dismiss(const std::string& turn_id);
 
-    // The bold row's id — empty when no rows are open.
     std::string current_id() const;
 
     size_t row_count() const;
 
-    // What the render reads — a copy of current state, never a live pointer
-    // into this file's private data.
     struct Row {
         std::string              turn_id;
         std::string              subject;
@@ -93,4 +79,4 @@ private:
     RebuttalTurn*      turn_ = nullptr;
 };
 
-} // namespace prime::frontend
+}

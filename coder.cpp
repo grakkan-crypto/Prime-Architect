@@ -19,32 +19,16 @@
 
 #include <thread>
 
-// ---------------------------------------------------------------------------
-// FORWARD DECLARATION — called exactly as if it exists; built around its
-// call, and its real header replaces this declaration outright.
-//
-// PRESENCE — "is this file here, is it running?" The one presence call,
-// whatever the target: answered from OUTSIDE it, by the system's liveness
-// mechanism, the target named on the way in. Silence is N.
-//
-// WAKE — ProjectIngest's own load, called directly. A bare wake: nothing
-// passed, because there is nothing to pass — ProjectIngest reads the
-// active project off the Cylon Bar itself. Nothing handed back. Where its
-// header is not yet built to this call, it is built around it.
-// ---------------------------------------------------------------------------
 namespace prime {
 
 bool present(const std::string& target);
 
-} // namespace prime
+}
 
 namespace prime::pipelines::coder {
 
 namespace {
 
-// ===========================================================================
-// FLEET ROSTER — every agent this pipeline fields. Alphabetical.
-// ===========================================================================
 const std::vector<std::string> kRoster = {
     "Adept-Analyst",
     "Adept-Coder",
@@ -77,10 +61,6 @@ const std::vector<std::string> kRoster = {
     "Author",
 };
 
-// ===========================================================================
-// POOL TABLE — every pool this pipeline declares.
-//   { name, mask_count, mask_triggers, { { agent, bits }, ... } }
-// ===========================================================================
 const std::vector<PoolDeclaration> kPools = {
 
     {"SHARED_CONTEXT", 0, 0b0, {
@@ -230,10 +210,6 @@ const std::vector<PoolDeclaration> kPools = {
         {"Architect-Synth",          0b00},
     }},
 
-    // No agent writer, by design: the project is system-updated from disk
-    // after every code change, so it reflects what is on disk and does not
-    // rely on the trust of an AI. That write is ProjectIngest's, not an
-    // agent's, and does not belong on this table.
     {"PROJECT", 2, 0b001001, {
         {"Analyst-Coder",            0b00111000},
         {"Adept-Coder",              0b00000111},
@@ -263,18 +239,12 @@ const std::vector<PoolDeclaration> kPools = {
     }},
 };
 
-// The payload, whole, in its final form. This is what every wake hands over.
 const PipelinePayload kPayload = {kRoster, kPools};
 
-} // namespace
+}
 
-// ---------------------------------------------------------------------------
-// THE ONE WAKE
-// ---------------------------------------------------------------------------
 PipelinePayload pipeline() {
-    // ---- BESPOKE WAKE: PROJECTINGEST -----------------------------------
-    // Presence posted from outside, then fired regardless — detached,
-    // unjoined, nothing passed, nothing read back (Rules 2, 5, 6, 8).
+
     const bool wellness_check_project_ingest_present = present("ProjectIngest");
     (void)wellness_check_project_ingest_present;
 
@@ -282,10 +252,7 @@ PipelinePayload pipeline() {
         ProjectIngest{}.load();
     }).detach();
 
-    // ---- HAND OVER -----------------------------------------------------
-    // The payload, verbatim. A copy, owned by the receiver; nothing here is
-    // referenced afterward and nothing here is retained (Rule 7).
     return kPayload;
 }
 
-} // namespace prime::pipelines::coder
+}

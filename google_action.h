@@ -39,13 +39,13 @@ class EngineContext;
 
 enum class GoogleStatus {
     Ok,
-    Denied,          // caller is not an Analyst-department resident agent
+    Denied,
     NoPipeline,
-    UnknownService,  // not one of the five
+    UnknownService,
     MissingAction,
-    SetupRequired,   // credentials.json absent — human supplies OAuth secrets
-    AuthRequired,    // token.json absent or unrefreshable — human consent needed
-    ClientNotBound   // Google client library absent — nothing was executed
+    SetupRequired,
+    AuthRequired,
+    ClientNotBound
 };
 
 const char* google_status_name(GoogleStatus s);
@@ -55,13 +55,10 @@ struct GoogleOutcome {
     std::string  detail;
 };
 
-// Execute `action` against `service` on behalf of the resident agent
-// `source_agent`. `data` is the action's payload, opaque to the engine and
-// passed through to the client library at the seam — never interpreted here.
 GoogleOutcome google_action(EngineContext&     engine,
                             const std::string& source_agent,
                             const std::string& service,
                             const std::string& action,
                             const std::string& data);
 
-} // namespace prime
+}

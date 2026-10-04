@@ -71,8 +71,7 @@ class RebuttalHost;
 
 class RebuttalTurn {
 public:
-    // Registers with the switch (on_rebuttal_switch) — the push IS
-    // activation; the off-flip is this file's own last act echoed back.
+
     RebuttalTurn(KvPoolAllocator& kv,
                  PoolManipulation& pools,
                  LiveRegistry& registry,
@@ -82,27 +81,18 @@ public:
     RebuttalTurn(const RebuttalTurn&)            = delete;
     RebuttalTurn& operator=(const RebuttalTurn&) = delete;
 
-    // An interrupt while this file holds control: a new turn, its own id,
-    // its own row. (The FIRST interrupt is the switch's push — see ctor.)
     void interrupt();
 
-    // Commit's role during rebuttal — see the header block.
     void reply(std::string text);
 
-    // One trigger, three arrivals, one call. Host owns the cycle mechanics.
     void advance();
 
-    // The chat door: Adept-Infer recognised confirm/dismiss on the current
-    // exchange. This file acts first.
     void dismissed_from_chat();
 
-    // The UI door: the host already tore the row down and is telling this
-    // file the id. This file resolves.
     void closed_from_ui(const std::string& turn_id);
 
 private:
-    // The identical close both doors land on: the teardown, then the switch
-    // off if this was the last row.
+
     void resolve_close(const std::string& turn_id);
 
     KvPoolAllocator&  kv_;
@@ -112,4 +102,4 @@ private:
     ChatRender&       chat_;
 };
 
-} // namespace prime::frontend
+}

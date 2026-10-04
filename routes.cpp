@@ -27,9 +27,6 @@ namespace prime {
 
 namespace {
 
-// EngineStatus — engine health, loaded pipeline, memory state. Needs nothing but
-// the engine context, which makes it the natural first command: it exercises the
-// full path (decode -> dispatch -> unary result) without any model loaded.
 Result handle_engine_status(EngineContext& engine, const Command&) {
     const bool     loaded    = engine.has_pipeline();
     const uint64_t committed = engine.memory().total_committed();
@@ -54,20 +51,17 @@ Result handle_engine_status(EngineContext& engine, const Command&) {
     return Result::ok(std::move(body));
 }
 
-} // namespace
-
-void register_routes(CommandTable& table, EngineContext& /*engine*/) {
-    // ---- Core ----
-    table.add_unary(CommandId::EngineStatus, handle_engine_status);
-
-    // ---- Pipeline ----
-    register_pipeline_routes(table);   // PipelineLoad, PipelineUnload
-
-    // ---- HITL write, rules, agents ----
-    register_dev_routes(table);        // write cycle, rules, agents
-
-    // ---- Google Workspace ----
-    register_google_routes(table);     // Google
 }
 
-} // namespace prime
+void register_routes(CommandTable& table, EngineContext& ) {
+
+    table.add_unary(CommandId::EngineStatus, handle_engine_status);
+
+    register_pipeline_routes(table);
+
+    register_dev_routes(table);
+
+    register_google_routes(table);
+}
+
+}

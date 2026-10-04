@@ -21,9 +21,7 @@ bool ends_with(const std::string& text, const std::string& marker) {
            text.compare(text.size() - marker.size(), marker.size(), marker) == 0;
 }
 
-} // namespace
-
-// ---- one name taken apart ---------------------------------------------------
+}
 
 std::vector<NameParts> break_down(const std::vector<std::string>& names) {
     std::vector<NameParts> out;
@@ -45,8 +43,6 @@ std::vector<NameParts> break_down(const std::vector<std::string>& names) {
     }
     return out;
 }
-
-// ---- departments ------------------------------------------------------------
 
 std::vector<DepartmentGroup> group_by_department(const std::vector<std::string>& names) {
     std::vector<DepartmentGroup> out;
@@ -70,8 +66,6 @@ std::vector<DepartmentMember> in_departments(const std::vector<std::string>& nam
     return out;
 }
 
-// ---- split families ---------------------------------------------------------
-
 std::vector<SplitFamily> split_families(const std::vector<std::string>& names) {
     std::vector<SplitFamily> out;
     for (const auto& p : break_down(names)) {
@@ -87,8 +81,6 @@ std::vector<SplitFamily> split_families(const std::vector<std::string>& names) {
     }
     return out;
 }
-
-// ---- arbiters ---------------------------------------------------------------
 
 std::string arbiter_for(const std::vector<std::string>& names,
                         const std::string& agent) {
@@ -109,4 +101,4 @@ Arbiters arbiters(const std::vector<std::string>& names) {
     return out;
 }
 
-} // namespace prime
+}

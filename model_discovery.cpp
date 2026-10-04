@@ -11,7 +11,6 @@ namespace fs = std::filesystem;
 
 namespace {
 
-// The one reserved top-level name that is not a department.
 constexpr const char* kReservedStaging = "Raw_Models";
 
 bool is_gguf(const fs::path& p) {
@@ -22,7 +21,7 @@ bool is_gguf(const fs::path& p) {
     return ext == ".gguf";
 }
 
-} // namespace
+}
 
 ModelDiscovery::ModelDiscovery(std::string root_path)
     : root_path_(std::move(root_path)) {}
@@ -33,10 +32,7 @@ void ModelDiscovery::scan() {
 
     fs::path root(root_path_);
     if (!fs::exists(root) || !fs::is_directory(root)) {
-        // Root itself is absent or not a directory. Nothing to report — an empty
-        // picture is a truthful picture of "no Models root here". Callers that
-        // expected models will see an empty result and can surface that at their
-        // own layer; discovery does not invent entries.
+
         return;
     }
 
@@ -64,20 +60,17 @@ ModelDiscovery::scan_department(const std::string& dept_name,
         const fs::path& item_path = item.path();
         const std::string item_name = item_path.filename().string();
 
-        // Skip dotfiles / dot-directories.
         if (!item_name.empty() && item_name.front() == '.') continue;
 
         if (item.is_directory()) {
-            // Collect .gguf parts inside the subfolder, sorted by name so the
-            // first part is a stable load handle for split models.
+
             std::vector<fs::path> parts;
             for (const auto& sub : fs::directory_iterator(item_path))
                 if (sub.is_regular_file() && is_gguf(sub.path()))
                     parts.push_back(sub.path());
 
             if (parts.empty()) {
-                // Under GGUF-only, a subfolder with no .gguf cannot be classified.
-                // Surface it as a Malformed entry rather than dropping it.
+
                 DiscoveredModel m;
                 m.name        = item_name;
                 m.department  = dept_name;
@@ -111,10 +104,7 @@ ModelDiscovery::scan_department(const std::string& dept_name,
             m.parts_count = 1;
             models.push_back(std::move(m));
         }
-        // Any other file type (including stray .onnx) is not a recognised model
-        // shape and is not reported — it is not a subfolder that failed to
-        // classify, it is simply not a model. Only unclassifiable *subfolders*
-        // surface as Malformed.
+
     }
 
     return models;
@@ -139,4 +129,4 @@ ModelDiscovery::loadable_for(const std::string& department) const {
     return out;
 }
 
-} // namespace prime
+}

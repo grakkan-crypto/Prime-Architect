@@ -59,4 +59,4 @@ void LayoutTabs::set_active_indicator(const std::string& text) {
     if (LayoutTab* t = active()) t->indicator = text;
 }
 
-} // namespace prime
+}

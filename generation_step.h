@@ -55,53 +55,17 @@
 
 namespace prime {
 
-// ---------------------------------------------------------------------------
-// StepResult — what step() returns to its caller
-//
-// logits: raw scores over the model's NATIVE vocabulary, length == vocab_size.
-//   For single-model generation: caller samples or argmaxes directly.
-//   For fusion: caller projects each constituent's logits into canonical space
-//   via VocabUnion before handing to kernel_logit_fusion.
-//
-// attn_weights: per-layer attention weight vectors, populated only when
-//   export is armed. Empty otherwise — caller must not read it if
-//   model.export_attn_weights is false.
-// ---------------------------------------------------------------------------
 struct StepResult {
-    std::vector<float> logits;           // [vocab_size] native logit scores
-    std::vector<std::vector<float>> attn_weights; // [n_layers][context_len] — populated when export armed
+    std::vector<float> logits;
+    std::vector<std::vector<float>> attn_weights;
 };
 
-// ---------------------------------------------------------------------------
-// GenerationStep
-// ---------------------------------------------------------------------------
 class GenerationStep {
 public:
     explicit GenerationStep(KernelImpl& kernels, KvPoolAllocator& pool);
 
-    // Run one forward pass for one new token.
-    //
-    // model:    the loaded model to step — must pass is_valid().
-    // token_id: the new token to process (the last token chosen by the caller,
-    //           or the final prompt token on the first step).
-    //
-    // Returns logits over model.vocab_size in native token space.
-    // Throws std::runtime_error if the model is invalid or the KV pool
-    // cannot be resolved.
-    //
-    // Does NOT append the token to KV state — call append() after sampling.
     StepResult step(ResidentModel& model, uint32_t token_id);
 
-    // Commit the chosen token's K/V values into the model's KV pool and
-    // advance model.kv_position by 1.
-    //
-    // chosen_token_id: the token selected after sampling (may differ from
-    //   the token passed to step() in the fusion case, where one constituent's
-    //   logits contributed to a merged selection).
-    //
-    // The separation between step() and append() is load-bearing for fusion:
-    // all constituents step in parallel, merge happens, ONE token is chosen,
-    // then append() is called on ALL constituents with that same token.
     void append(ResidentModel& model, uint32_t chosen_token_id,
                 const std::vector<float>& kv_scratch);
 
@@ -109,26 +73,20 @@ private:
     KernelImpl&      kernels_;
     KvPoolAllocator& pool_;
 
-    // Build a KernelDescriptor for this model and kernel type.
     KernelDescriptor make_descriptor(const ResidentModel& model,
                                      KernelType type) const;
 
-    // Resolve the KV region binding for one layer of one model.
-    // Throws if the pool cannot be found.
     KvRegionBinding make_kv_binding(const ResidentModel& model,
                                     uint32_t layer) const;
 
-    // Project native logits to canonical space via the union.
-    // Used by the fusion caller — not called inside step() itself.
-    // Provided here as a utility so fusion loops don't have to re-derive it.
     static void project_to_canonical(
         const std::vector<float>& native_logits,
         const ResidentModel&      model,
         const VocabUnion&         vocab_union,
-        std::vector<float>&       out_canonical   // [canonical_vocab_size]
+        std::vector<float>&       out_canonical
     );
 
-    friend class FusionLoop;  // FusionLoop calls project_to_canonical directly
+    friend class FusionLoop;
 };
 
-} // namespace prime
+}

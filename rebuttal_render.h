@@ -49,8 +49,7 @@ private:
 
     RebuttalHost& host_;
 
-    // View state only — which lines are expanded.
     std::vector<TurnId> expanded_;
 };
 
-} // namespace prime::frontend
+}

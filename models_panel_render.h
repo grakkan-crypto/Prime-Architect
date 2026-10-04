@@ -50,17 +50,12 @@
 
 namespace prime {
 
-// Reads a temperature for a (team, agent) PAIR. nullopt when that pair has no
-// control — the row then shows nothing, never a zero.
 using PairTempReadFn = std::function<std::optional<double>(const std::string& team,
                                                            const std::string& agent)>;
 
-// The flat value a split fusion runs at: parent team, 1-based duplicate index.
 using SplitFlatTempFn = std::function<std::optional<double>(const std::string& parent_team,
                                                             int duplicate_index)>;
 
-// Resolves an agent name to its department, for the Arbiter cap and for counting
-// generating members.
 using NameToDepartmentFn = std::function<std::string(const std::string& name)>;
 
 using DirtyFn = std::function<void()>;
@@ -113,4 +108,4 @@ private:
     char  add_team_name_[128] = {0};
 };
 
-} // namespace prime
+}

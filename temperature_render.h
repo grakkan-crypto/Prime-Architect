@@ -61,11 +61,8 @@ class TemperatureRender {
 public:
     explicit TemperatureRender(LiveRegistry& registry) : registry_(registry) {}
 
-    // Takes the working copy and acknowledges defaults. Call when the panel
-    // is opened, not every frame.
     void open();
 
-    // Discards the working copy. Nothing is written; nothing changes.
     void close();
 
     bool is_open() const { return open_; }
@@ -86,15 +83,12 @@ private:
 
     bool open_ = false;
 
-    // Lives only between open() and close(). The registry's own values are
-    // untouched until save.
     std::vector<LiveTemperature> working_;
 
-    // Transient view state, owned here.
     std::string rejected_team_;
     std::string rejected_agent_;
     std::string save_error_;
     bool        saved_notice_ = false;
 };
 
-} // namespace prime
+}

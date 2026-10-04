@@ -34,13 +34,7 @@ namespace prime {
 
 class TurnActions {
 public:
-    // on_commit — runs after the prompt is placed and the box cleared. What the
-    //             system does when the user finishes composing.
-    // on_abort  — runs before this pipeline's agents are marked idle. The actual
-    //             stop.
-    // roster    — returns this pipeline's agents. A function, not a fixed list,
-    //             because the loaded pipeline can change; abort always reads the
-    //             current one.
+
     TurnActions(prime::frontend::IngestionState& ingestion,
                 prime::frontend::AgentActivity&  activity,
                 ChatRender&                      chat,
@@ -61,4 +55,4 @@ private:
     std::function<std::vector<std::string>()> roster_;
 };
 
-} // namespace prime
+}

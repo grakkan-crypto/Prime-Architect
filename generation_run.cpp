@@ -28,12 +28,10 @@ GenerationOutcome fail(GenerationStatus s, std::string detail) {
     return o;
 }
 
-// The legal range. Not a clamp target — a gate. A value outside it is a caller
-// error and is reported as one.
 constexpr double kMinTemperature = 0.0;
 constexpr double kMaxTemperature = 2.0;
 
-} // namespace
+}
 
 GenerationOutcome run_generation(EngineContext&      engine,
                                  const std::string&  agent_name,
@@ -47,7 +45,6 @@ GenerationOutcome run_generation(EngineContext&      engine,
         return fail(GenerationStatus::NoPipeline,
                     "no pipeline resident — nothing is loaded to step");
 
-    // Refused, not corrected. See the header note.
     if (!(temperature >= kMinTemperature && temperature <= kMaxTemperature))
         return fail(GenerationStatus::BadTemperature,
                     agent_name + ": temperature " + std::to_string(temperature) +
@@ -58,24 +55,15 @@ GenerationOutcome run_generation(EngineContext&      engine,
         return fail(GenerationStatus::AgentNotResident,
                     "not resident in the current pipeline: " + agent_name);
 
-    // The handle is assigned when the agent is bound. Zero means it was never
-    // bound properly, which the kernel cannot recover from — it is the key the
-    // kernel resolves this agent's readable pools with.
     if (slot->token_handle == 0)
         return fail(GenerationStatus::AgentNotResident,
                     agent_name + ": bound without a token handle");
 
-    // The kernel call is resolved once, at bind time, from the slot's contract
-    // (see dispatch.h, pipeline_routes.cpp). Null here means that resolution
-    // never happened for this slot's contract — a binding gap, not something
-    // to guess a fallback for.
     if (slot->kernel_call == nullptr)
         return fail(GenerationStatus::KernelCallUnbound,
                     agent_name + ": contract " + contract_name(slot->contract) +
                     " has no bound kernel call — check contract_from_department()");
 
-    // Identity only. No prompt, no conversation, no directive — the agent reads
-    // its own pools under the access mask compiled for this pipeline.
     DispatchRequest req;
     req.contract     = slot->contract;
     req.format       = slot->format;
@@ -85,16 +73,12 @@ GenerationOutcome run_generation(EngineContext&      engine,
     req.token_handle = slot->token_handle;
     req.temperature  = temperature;
 
-    // Abort is checked per token, before the token is handed on. Returning false
-    // is the kernel's signal to stop generating; it is not an error condition.
     bool aborted = false;
     TokenSink guarded = [&](const PrimeToken& tok, const std::string& text) -> bool {
         if (abort.load()) { aborted = true; return false; }
         return sink ? sink(tok, text) : false;
     };
 
-    // The call itself was resolved once, at load — nothing is classified or
-    // routed here. This is that resolved call, made directly.
     const DispatchResult result = slot->kernel_call(engine.kernel_backend(), req, guarded);
 
     GenerationOutcome out;
@@ -113,4 +97,4 @@ GenerationOutcome run_generation(EngineContext&      engine,
     return out;
 }
 
-} // namespace prime
+}

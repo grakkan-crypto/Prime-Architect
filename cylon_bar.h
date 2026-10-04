@@ -8,7 +8,6 @@
 
 namespace prime {
 
-// Draws at the current position, full width available.
 void draw_cylon_bar(bool active, float height = 3.0f);
 
-} // namespace prime
+}

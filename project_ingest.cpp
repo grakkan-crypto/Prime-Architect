@@ -63,36 +63,24 @@ namespace prime {
 
 namespace {
 
-// The class every project pool belongs to — what the loader gives the pool.
-// The pool does its own class lookup from this; nothing here resolves it.
 constexpr const char* kProjectClass = "Project";
 
-// Hidden entries are skipped: .git and its like are not the project.
 bool is_hidden(const fs::path& p) {
     const std::string name = p.filename().string();
     return !name.empty() && name.front() == '.';
 }
 
-// ===========================================================================
-// PROJECT'S PROCESSING — splitting one source file into function-sized blocks
-// ===========================================================================
-
 enum class ChunkStyle {
-    Braces,      // depth counted with { and }
-    Indentation, // depth counted with leading whitespace
+    Braces,
+    Indentation,
 };
 
-// One block of a source file. Lines are 1-based and inclusive, so a block can
-// be reported to a human without off-by-one translation.
 struct CodeBlock {
     uint32_t    first_line = 0;
     uint32_t    last_line  = 0;
     std::string text;
 };
 
-// -------------------------------------------------------------------------
-// Shared helpers
-// -------------------------------------------------------------------------
 std::vector<std::string> split_lines(const std::string& text) {
     std::vector<std::string> lines;
     std::string cur;
@@ -120,7 +108,7 @@ std::string join(const std::vector<std::string>& lines, size_t a, size_t b) {
 
 CodeBlock make_block(const std::vector<std::string>& lines, size_t a, size_t b) {
     CodeBlock blk;
-    blk.first_line = static_cast<uint32_t>(a + 1); // 1-based for humans
+    blk.first_line = static_cast<uint32_t>(a + 1);
     blk.last_line  = static_cast<uint32_t>(b + 1);
     blk.text       = join(lines, a, b);
     return blk;
@@ -132,17 +120,9 @@ std::string lower(std::string s) {
     return s;
 }
 
-// -------------------------------------------------------------------------
-// Brace family
-// -------------------------------------------------------------------------
-
-// Count braces on one line, skipping anything inside a string, a character
-// literal or a comment. in_block_comment carries across lines because /* */
-// does. This is a scanner, not a parser: it knows quotes, escapes and comment
-// markers, and nothing else about any language.
 struct BraceCount {
-    int opened = 0; // count of '{' seen — not net; needed to spot a one-line unit
-    int net    = 0; // '{' minus '}'
+    int opened = 0;
+    int net    = 0;
 };
 
 BraceCount scan_braces(const std::string& line, bool& in_block_comment) {
@@ -159,7 +139,7 @@ BraceCount scan_braces(const std::string& line, bool& in_block_comment) {
             continue;
         }
         if (in_string) {
-            if (c == '\\') { ++i; continue; }   // escaped anything
+            if (c == '\\') { ++i; continue; }
             if (c == '"')  in_string = false;
             continue;
         }
@@ -169,7 +149,7 @@ BraceCount scan_braces(const std::string& line, bool& in_block_comment) {
             continue;
         }
 
-        if (c == '/' && n == '/') break;                       // rest of line is comment
+        if (c == '/' && n == '/') break;
         if (c == '/' && n == '*') { in_block_comment = true; ++i; continue; }
         if (c == '"')  { in_string = true; continue; }
         if (c == '\'') { in_char   = true; continue; }
@@ -186,9 +166,6 @@ std::vector<CodeBlock> chunk_braces(const std::vector<std::string>& lines) {
     int  depth            = 0;
     bool in_block_comment = false;
 
-    // A run of top-level lines that opened nothing — includes, usings, globals,
-    // a doc comment. Held rather than emitted immediately, because if the next
-    // unit starts on the very next line this run belongs to it.
     long pending_start = -1;
     long pending_last  = -1;
     long unit_start    = -1;
@@ -196,8 +173,6 @@ std::vector<CodeBlock> chunk_braces(const std::vector<std::string>& lines) {
     for (size_t i = 0; i < lines.size(); ++i) {
         const bool blank = is_blank(lines[i]);
 
-        // A blank line at top level breaks adjacency: whatever was pending is
-        // its own thing, not a preamble to whatever comes next.
         if (blank && unit_start < 0) {
             if (pending_start >= 0) {
                 out.push_back(make_block(lines, static_cast<size_t>(pending_start),
@@ -211,8 +186,7 @@ std::vector<CodeBlock> chunk_braces(const std::vector<std::string>& lines) {
 
         if (unit_start < 0) {
             if (bc.opened > 0) {
-                // This line opens a unit. Fold in an immediately-preceding run
-                // so a doc comment or attribute stays with what it describes.
+
                 long start = static_cast<long>(i);
                 if (pending_start >= 0 && pending_last == static_cast<long>(i) - 1) {
                     start = pending_start;
@@ -224,7 +198,7 @@ std::vector<CodeBlock> chunk_braces(const std::vector<std::string>& lines) {
 
                 unit_start = start;
                 depth     += bc.net;
-                if (depth <= 0) { // opened and closed on one line
+                if (depth <= 0) {
                     out.push_back(make_block(lines, static_cast<size_t>(unit_start), i));
                     unit_start = -1;
                     depth      = 0;
@@ -243,8 +217,6 @@ std::vector<CodeBlock> chunk_braces(const std::vector<std::string>& lines) {
         }
     }
 
-    // Whatever is still open at end of file is a block in its own right —
-    // unbalanced braces are somebody else's problem, not a reason to lose text.
     if (unit_start >= 0)
         out.push_back(make_block(lines, static_cast<size_t>(unit_start), lines.size() - 1));
     else if (pending_start >= 0)
@@ -253,22 +225,18 @@ std::vector<CodeBlock> chunk_braces(const std::vector<std::string>& lines) {
     return out;
 }
 
-// -------------------------------------------------------------------------
-// Indentation family
-// -------------------------------------------------------------------------
 size_t indent_of(const std::string& s) {
     size_t n = 0;
     for (char c : s) {
         if (c == ' ')       ++n;
-        else if (c == '\t') n += 4; // a tab is four columns for depth purposes only
+        else if (c == '\t') n += 4;
         else break;
     }
     return n;
 }
 
 std::vector<CodeBlock> chunk_indentation(const std::vector<std::string>& lines) {
-    // A raw unit is one column-zero line plus everything under it. first/last are
-    // trimmed to non-blank so trailing blank lines never create false adjacency.
+
     struct Unit { size_t first; size_t last; bool has_body; };
     std::vector<Unit> units;
 
@@ -285,21 +253,18 @@ std::vector<CodeBlock> chunk_indentation(const std::vector<std::string>& lines) 
     };
 
     for (size_t i = 0; i < lines.size(); ++i) {
-        if (is_blank(lines[i])) continue; // blanks belong to nothing in particular
+        if (is_blank(lines[i])) continue;
         if (indent_of(lines[i]) == 0) {
             close_unit();
             cur_first = cur_last = static_cast<long>(i);
         } else {
-            if (cur_first < 0) { cur_first = static_cast<long>(i); } // indented with no header
+            if (cur_first < 0) { cur_first = static_cast<long>(i); }
             cur_last = static_cast<long>(i);
             has_body = true;
         }
     }
     close_unit();
 
-    // Body-less units (imports, globals, decorators) accumulate; a unit WITH a
-    // body absorbs an immediately-adjacent run of them, which is what keeps a
-    // decorator with its function.
     std::vector<CodeBlock> out;
     long pending_first = -1;
     long pending_last  = -1;
@@ -335,20 +300,11 @@ std::vector<CodeBlock> chunk_indentation(const std::vector<std::string>& lines) 
     return out;
 }
 
-// -------------------------------------------------------------------------
-// The two public faces of the chunking (public to this file only)
-// -------------------------------------------------------------------------
-
-// Which family a file belongs to, by extension. nullopt means "not code this
-// chunking handles" — the walk skips the file rather than chunking it
-// wrongly. Extension matching is case-insensitive.
 std::optional<ChunkStyle> chunk_style_for_path(const std::string& path) {
     const auto dot = path.find_last_of('.');
     if (dot == std::string::npos) return std::nullopt;
     const std::string ext = lower(path.substr(dot));
 
-    // The whole language table. Adding a language is one entry here — never new
-    // logic, which is the point of the two-family design.
     if (ext == ".cpp" || ext == ".cc"  || ext == ".cxx" || ext == ".c"   ||
         ext == ".h"   || ext == ".hpp" || ext == ".hxx" ||
         ext == ".cs"  || ext == ".kt"  || ext == ".kts" ||
@@ -358,12 +314,9 @@ std::optional<ChunkStyle> chunk_style_for_path(const std::string& path) {
 
     if (ext == ".py") return ChunkStyle::Indentation;
 
-    return std::nullopt; // not code this chunking handles — the walk skips it
+    return std::nullopt;
 }
 
-// Split source text into blocks. Never returns an empty list for non-empty
-// input: text that has no structure at all comes back as a single block, which
-// is the honest answer rather than nothing.
 std::vector<CodeBlock> chunk_source(const std::string& text, ChunkStyle style) {
     const std::vector<std::string> lines = split_lines(text);
     if (lines.empty()) return {};
@@ -372,31 +325,20 @@ std::vector<CodeBlock> chunk_source(const std::string& text, ChunkStyle style) {
         ? chunk_braces(lines)
         : chunk_indentation(lines);
 
-    // Text with no structure at all is one block. Returning nothing would lose
-    // the file silently, which is worse than a single oversized block.
     if (out.empty()) out.push_back(make_block(lines, 0, lines.size() - 1));
     return out;
 }
 
-// ===========================================================================
-// The entry — Project's processing plugged into the Loader
-// ===========================================================================
-
-// The Project configuration for one file: one entry, one function. The
-// chunking above decides how many pools the file becomes — FUNCTIONAL
-// BLOCKS, its call entirely. Blocks carry NO audience: project pools are
-// the lever-operated kind, their visibility granted live by masking, the
-// same for every block.
 LoadEntry entry_for(const std::string& path, ChunkStyle style) {
     LoadEntry e;
     e.path       = path;
     e.class_name = kProjectClass;
-    e.facts      = UnitMaskFacts{/*fixed_no_holder=*/false,
-                                 /*cascade_exempt=*/false};
+    e.facts      = UnitMaskFacts{false,
+                                 false};
 
     e.process = [style](const std::string& text) {
         std::vector<LoadUnit> units;
-        if (text.empty()) return units;   // nothing to load loads nothing
+        if (text.empty()) return units;
 
         const std::vector<CodeBlock> blocks = chunk_source(text, style);
         units.reserve(blocks.size());
@@ -411,18 +353,13 @@ LoadEntry entry_for(const std::string& path, ChunkStyle style) {
     return e;
 }
 
-} // namespace
+}
 
-// ---------------------------------------------------------------------------
-// Ingest — one request, one entry per code file.
-// ---------------------------------------------------------------------------
 IngestReport ProjectIngest::ingest(const std::string& root_path) {
     IngestReport report;
 
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // Not ready from the first instant, not from the end. Anything gating on
-    // this is held off for the whole operation, not just its tail.
     ready_ = false;
     root_  = root_path;
 
@@ -458,10 +395,7 @@ IngestReport ProjectIngest::ingest(const std::string& root_path) {
 
     const LoaderReport loaded = loader_.load(request);
     if (!loaded.ok) {
-        // The loader reports the partial load precisely; this configuration's
-        // policy is all-or-nothing — a partially-resident project is the
-        // exact state the readiness gate exists to prevent, so everything
-        // any entry stood up leaves RAM before the failure is reported.
+
         for (const auto& entry : request.entries) loader_.unload(entry.path);
         report.failure = loaded.failure;
         return report;
@@ -469,7 +403,7 @@ IngestReport ProjectIngest::ingest(const std::string& root_path) {
 
     sources_.clear();
     for (const auto& er : loaded.entries) {
-        if (er.pool_ids.empty()) continue;  // empty file: nothing resident, correctly
+        if (er.pool_ids.empty()) continue;
         sources_.push_back(er.path);
         report.blocks_minted += er.pool_ids.size();
         ++report.files_ingested;
@@ -480,19 +414,11 @@ IngestReport ProjectIngest::ingest(const std::string& root_path) {
     return report;
 }
 
-// ---------------------------------------------------------------------------
-// Single-file reload — the file-grain motion: every pool tied to the file
-// destroyed, the file reloaded from disk whole. Fired by the confirmed
-// write path (deferred) once the edited Pool IDs have been cross-referenced
-// to their file through the registry's files list.
-// ---------------------------------------------------------------------------
 IngestReport ProjectIngest::reload_file(const std::string& path) {
     IngestReport report;
 
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // Old first, always. A file that is no longer code never reaches a load
-    // at all, so the teardown is explicit here.
     loader_.unload(path);
     sources_.erase(std::remove(sources_.begin(), sources_.end(), path),
                    sources_.end());
@@ -500,7 +426,7 @@ IngestReport ProjectIngest::reload_file(const std::string& path) {
     const auto style = chunk_style_for_path(path);
     std::error_code ec;
     if (!style || !fs::is_regular_file(path, ec)) {
-        report.ok = true; // deleted or no longer code: gone is the whole outcome
+        report.ok = true;
         return report;
     }
 
@@ -509,7 +435,7 @@ IngestReport ProjectIngest::reload_file(const std::string& path) {
 
     const LoaderReport loaded = loader_.load(request);
     if (!loaded.ok) {
-        loader_.unload(path); // nothing partially standing
+        loader_.unload(path);
         report.failure = loaded.failure;
         return report;
     }
@@ -520,13 +446,10 @@ IngestReport ProjectIngest::reload_file(const std::string& path) {
         report.blocks_minted  = er.pool_ids.size();
         report.files_ingested = 1;
     }
-    report.ok = true; // an emptied file leaving RAM is also the correct outcome
+    report.ok = true;
     return report;
 }
 
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
 bool ProjectIngest::ready() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return ready_;
@@ -540,4 +463,4 @@ void ProjectIngest::clear() {
     ready_ = false;
 }
 
-} // namespace prime
+}

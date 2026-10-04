@@ -13,7 +13,4 @@
 
 namespace prime::frontend {
 
-// (No out-of-line definitions required at present. See header for the inline
-// invariant: IngestionState::end_turn.)
-
-} // namespace prime::frontend
+}

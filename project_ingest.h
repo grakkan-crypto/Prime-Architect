@@ -43,10 +43,10 @@ class FileLoader;
 
 struct IngestReport {
     bool        ok = false;
-    std::string failure;            // populated only when ok == false
+    std::string failure;
     size_t      files_ingested = 0;
     size_t      blocks_minted  = 0;
-    size_t      files_skipped  = 0; // present but not code the chunker handles
+    size_t      files_skipped  = 0;
 };
 
 class ProjectIngest {
@@ -56,23 +56,12 @@ public:
     ProjectIngest(const ProjectIngest&)            = delete;
     ProjectIngest& operator=(const ProjectIngest&) = delete;
 
-    // Walk root_path and hand the loader one entry per code file, one
-    // request. All or nothing: any entry failing tears down every file this
-    // call made resident before returning.
     IngestReport ingest(const std::string& root_path);
 
-    // Replace one file's residency: destroy every pool tied to it, reload
-    // it from disk whole. Fired by the confirmed write path (deferred) once
-    // the edited Pool IDs have been cross-referenced to their file. A file
-    // that is gone, no longer code, or now empty simply leaves RAM —
-    // correct, not a failure.
     IngestReport reload_file(const std::string& path);
 
-    // False from the first instant of ingest, true once the last pool is
-    // resident. Read by whatever gates the agents that consume the project.
     bool ready() const;
 
-    // Forget the project entirely.
     void clear();
 
     const std::string& root() const { return root_; }
@@ -82,8 +71,8 @@ private:
 
     mutable std::mutex       mutex_;
     std::string              root_;
-    std::vector<std::string> sources_;   // files with pools standing, for teardown
+    std::vector<std::string> sources_;
     bool                     ready_ = false;
 };
 
-} // namespace prime
+}

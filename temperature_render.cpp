@@ -11,9 +11,6 @@ namespace prime {
 void TemperatureRender::open() {
     working_ = registry_.temperatures();
 
-    // Opening IS the acknowledgement. Cleared whether or not anything is then
-    // edited, so an operator content with the default clears the warning by
-    // looking at it.
     registry_.acknowledge_defaults();
     for (auto& e : working_) e.is_default = false;
 
@@ -25,7 +22,7 @@ void TemperatureRender::open() {
 }
 
 void TemperatureRender::close() {
-    // Discarded outright. Nothing written, nothing changed, nothing asked.
+
     working_.clear();
     rejected_team_.clear();
     rejected_agent_.clear();
@@ -51,8 +48,6 @@ void TemperatureRender::draw() {
         return;
     }
 
-    // Teams, in the registry's own order. A split-generated team is never a
-    // group of its own — it only ever appears as a label inside its parent.
     for (const auto& t : registry_.teams()) {
         if (!t.parent.empty()) continue;
 
@@ -69,15 +64,12 @@ void TemperatureRender::draw() {
         }
         if (controllable.empty()) continue;
 
-        // Runner labels, positional against this same member list. Empty when
-        // the team is not split — no labels, no column.
         std::vector<std::string> labels(members.size());
         if (auto sp = registry_.split_parent(t.name)) {
             for (size_t i = 0; i < sp->runners.size() && i < labels.size(); ++i)
                 labels[i] = sp->runners[i];
         }
 
-        // Re-index the labels onto the controllable subset, keeping position.
         std::vector<std::string> shown_labels;
         shown_labels.reserve(controllable.size());
         for (const auto& m : controllable) {
@@ -136,7 +128,7 @@ void TemperatureRender::draw_member_row(const std::string& team,
                            [&](const LiveTemperature& e) {
                                return e.team == team && e.agent == agent;
                            });
-    // No entry means no control. Nothing drawn — deliberately not a zero.
+
     if (it == working_.end()) return;
 
     ImGui::PushID(agent.c_str());
@@ -144,7 +136,7 @@ void TemperatureRender::draw_member_row(const std::string& team,
     ImGui::SetNextItemWidth(90.0f);
     float value = static_cast<float>(it->value);
     if (ImGui::InputFloat("##temp", &value, 0.1f, 0.1f, "%.2f")) {
-        // Edits the WORKING COPY only. The registry is untouched until save.
+
         it->value = static_cast<double>(value);
         if (rejected_team_ == team && rejected_agent_ == agent) {
             rejected_team_.clear();
@@ -157,8 +149,6 @@ void TemperatureRender::draw_member_row(const std::string& team,
     ImGui::SameLine();
     ImGui::TextUnformatted(agent.c_str());
 
-    // Which runner borrows this member's value in split mode. Traceability
-    // only — never a second editable field.
     if (!runner_label.empty()) {
         ImGui::SameLine();
         ImGui::TextDisabled("   %s", runner_label.c_str());
@@ -211,4 +201,4 @@ void TemperatureRender::do_save() {
     }
 }
 
-} // namespace prime
+}

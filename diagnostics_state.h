@@ -29,29 +29,20 @@
 
 namespace prime::frontend {
 
-// One diagnostics line. is_error lets the panel colour/filter without parsing
-// the text. Kept minimal — this is a feed line, not a record.
 struct DiagnosticsLine {
     std::string text;
     bool        is_error = false;
 };
 
-// A bounded ring of diagnostics lines. When full, the oldest line is dropped as
-// a new one arrives. Capacity is fixed at construction; the feed never grows
-// without bound regardless of session length.
 class DiagnosticsLog {
 public:
     explicit DiagnosticsLog(std::size_t capacity = kDefaultCapacity)
         : capacity_(capacity == 0 ? kDefaultCapacity : capacity) {}
 
-    // Append a line, evicting the oldest if at capacity. info() and error() are
-    // the ordinary call sites; write() takes the flag directly.
     void info (const std::string& text) { write(text, false); }
     void error(const std::string& text) { write(text, true);  }
     void write(const std::string& text, bool is_error);
 
-    // Snapshot the current feed, oldest-first, for rendering. Returns a copy so
-    // the UI never holds the lock while drawing.
     std::vector<DiagnosticsLine> snapshot() const;
 
     std::size_t size() const;
@@ -65,10 +56,6 @@ private:
     std::size_t                 capacity_;
 };
 
-// One step in the reasoning journey: which agent, what it was given, what it
-// reasoned (chain-of-thought), what it produced. The full quartet crosses here
-// for the diagnostics view — this is the frontend's own audit record and is
-// distinct from anything that rides the inter-agent boundary.
 struct JourneyEntry {
     std::string agent;
     std::string input;
@@ -76,9 +63,6 @@ struct JourneyEntry {
     std::string output;
 };
 
-// Append-only journey of agent steps for the session. Not bounded — it is the
-// reasoning audit trail, cleared explicitly (e.g. on a new session or on user
-// request), not aged out.
 class JourneyLog {
 public:
     JourneyLog() = default;
@@ -96,4 +80,4 @@ private:
     std::vector<JourneyEntry> entries_;
 };
 
-} // namespace prime::frontend
+}

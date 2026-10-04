@@ -66,12 +66,6 @@ void ModelsPanelRender::draw_department_pane() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// MIDDLE — agents
-//
-// No temperature here: this pane has no team in hand, so any single number
-// beside a bare agent name would be one of several without saying which.
-// ---------------------------------------------------------------------------
 void ModelsPanelRender::draw_agent_pane() {
     if (selected_department_.empty()) {
         ImGui::TextDisabled("Select a department.");
@@ -121,9 +115,6 @@ void ModelsPanelRender::draw_agent_pane() {
     ImGui::PopStyleVar();
 }
 
-// ---------------------------------------------------------------------------
-// RIGHT — teams
-// ---------------------------------------------------------------------------
 void ModelsPanelRender::draw_team_pane() {
     if (selected_department_.empty()) {
         ImGui::TextDisabled("Select a department.");
@@ -135,8 +126,6 @@ void ModelsPanelRender::draw_team_pane() {
     if (ImGui::SmallButton("+ Add Team")) add_team_open_ = true;
     ImGui::Separator();
 
-    // Parent teams only at the top level. Duplicates are nested inside the team
-    // they mirror.
     const auto dept_teams = teams_.authorable_in_department(selected_department_);
     if (dept_teams.empty()) {
         ImGui::TextDisabled("No teams in this department.");
@@ -171,9 +160,6 @@ void ModelsPanelRender::draw_team_row(const TeamEntry& team) {
 
             ImGui::BulletText("%s", member.c_str());
 
-            // Temperature for THIS PAIR. Read-only here. Nothing is drawn when
-            // the pair has no control: an absent control must not read as a
-            // deliberate zero.
             if (pair_temp_) {
                 if (auto t = pair_temp_(team.name, member)) {
                     ImGui::SameLine();
@@ -190,9 +176,6 @@ void ModelsPanelRender::draw_team_row(const TeamEntry& team) {
             ImGui::PopID();
         }
 
-        // Eligible pool: this department's agents, plus Arbiter. That is the
-        // whole rule, and it is what makes member lookup two bucket reads
-        // everywhere else.
         std::vector<MemberCandidate> eligible;
         for (const auto& a : agents_.in_department(team.department))
             eligible.push_back({a.name, a.department});
@@ -202,8 +185,7 @@ void ModelsPanelRender::draw_team_row(const TeamEntry& team) {
 
         if (!eligible.empty() && ImGui::BeginCombo("##add_member", "+ member")) {
             for (const auto& candidate : eligible) {
-                // Ineligible options are not listed rather than listed and
-                // refused on click.
+
                 if (teams_.check_eligibility(team, candidate, resolve)
                     != AddMemberResult::Added)
                     continue;
@@ -239,9 +221,6 @@ void ModelsPanelRender::draw_split_children(const TeamEntry& parent) {
         const auto& dup = duplicates[k];
         ImGui::PushID(dup.id.c_str());
 
-        // The flat value this fusion runs at, drawn from one of the parent's
-        // members. Derived rather than stored — it is fully determined by the
-        // parent's own authored values.
         std::string label = dup.name;
         if (split_flat_temp_) {
             if (auto flat = split_flat_temp_(parent.name, static_cast<int>(k) + 1)) {
@@ -253,9 +232,6 @@ void ModelsPanelRender::draw_split_children(const TeamEntry& parent) {
 
         ImGui::BulletText("%s", label.c_str());
 
-        // The same agents as the parent — not copies. Shown so the duplicate is
-        // visibly a full fusion rather than something reduced, with no controls:
-        // there is nothing about it to edit.
         ImGui::Indent();
         for (const auto& member : dup.roster)
             ImGui::TextDisabled("%s", member.c_str());
@@ -350,4 +326,4 @@ void ModelsPanelRender::draw_add_team_dialog() {
     ImGui::EndPopup();
 }
 
-} // namespace prime
+}

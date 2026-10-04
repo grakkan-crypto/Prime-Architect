@@ -26,8 +26,6 @@ const char* aether_status_name(AetherStatus s) {
 
 namespace {
 
-// The audit line. Its only caller is this file — a second caller would prove it
-// was always its own job and it would move out. There is not one.
 std::mutex  s_audit_mutex;
 std::string s_audit_log_path = "/prime/auxiliary/watchdog/aether_audit.log";
 
@@ -39,9 +37,6 @@ std::string iso_timestamp() {
     return buf;
 }
 
-// No turn_id. Turn identity is frontend bookkeeping (turn.h) and the engine has
-// no business holding it; the agent name and the timestamp are the provenance
-// that matters here.
 void audit(const std::string& source_agent, const std::string& url,
            AetherStatus status) {
     std::lock_guard<std::mutex> lk(s_audit_mutex);
@@ -62,7 +57,7 @@ AetherOutcome done(const std::string& source_agent, const std::string& url,
     return o;
 }
 
-} // namespace
+}
 
 AetherOutcome aether_fetch(EngineContext&     engine,
                            const std::string& source_agent,
@@ -71,7 +66,6 @@ AetherOutcome aether_fetch(EngineContext&     engine,
         return done(source_agent, url, AetherStatus::NoPipeline,
                     "no pipeline resident");
 
-    // Department is read from the registry, never from the caller's own name.
     auto caller = engine.slots().by_name(source_agent);
     if (!caller || caller->agent.department != "Analyst")
         return done(source_agent, url, AetherStatus::Denied,
@@ -85,17 +79,10 @@ AetherOutcome aether_fetch(EngineContext&     engine,
         return done(source_agent, url, AetherStatus::NoAetherSlot,
                     "this pipeline has no resident Aether agent to sanitise with");
 
-    // ---- The fetch itself ---------------------------------------------------
-    // INTEGRATION SEAM: Prime OS network layer. It does not exist. There is no
-    // stub content, no placeholder body, and no optimistic success — a caller
-    // that receives anything other than Ready received nothing at all, and knows
-    // it. When the network layer lands, the fetch happens here, the raw bytes go
-    // into POOL_AETHER_INPUT (host write, never through an agent), and the
-    // Aether agent is stepped over that pool via run_generation() to sanitise.
     (void)aether;
     return done(source_agent, url, AetherStatus::NetworkNotBound,
                 "Prime OS network layer is not bound; no fetch was attempted "
                 "and no content was produced");
 }
 
-} // namespace prime
+}

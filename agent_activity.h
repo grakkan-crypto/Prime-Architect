@@ -28,7 +28,6 @@ public:
         busy_[agent] = busy;
     }
 
-    // True if any agent on this list is working.
     bool any_busy(const std::vector<std::string>& agents) const {
         std::lock_guard<std::mutex> lock(mutex_);
         for (const auto& agent : agents) {
@@ -38,9 +37,6 @@ public:
         return false;
     }
 
-    // Force these agents to "not working". Used after an abort, so the bar
-    // can't stay running if an agent was stopped before it reported finishing.
-    // Only touches the agents given.
     void clear(const std::vector<std::string>& agents) {
         std::lock_guard<std::mutex> lock(mutex_);
         for (const auto& agent : agents) busy_[agent] = false;
@@ -51,4 +47,4 @@ private:
     std::unordered_map<std::string, bool>   busy_;
 };
 
-} // namespace prime::frontend
+}

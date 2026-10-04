@@ -66,15 +66,13 @@ namespace prime {
 
 class ConfigWriter {
 public:
-    // Serialize to the exact byte layout LiveRegistry::load() reads.
+
     static std::string to_blob(const std::vector<AgentEntry>& agents,
                                const std::vector<TeamEntry>& teams);
 
-    // Serialize and write. Returns false on failure so the caller can surface
-    // it — a failed save is a visible failure, never a silent no-op.
     static bool write(const std::string& config_path,
                       const std::vector<AgentEntry>& agents,
                       const std::vector<TeamEntry>& teams);
 };
 
-} // namespace prime
+}

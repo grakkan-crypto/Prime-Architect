@@ -31,4 +31,4 @@ private:
     std::vector<Line>  lines_;
 };
 
-} // namespace prime
+}

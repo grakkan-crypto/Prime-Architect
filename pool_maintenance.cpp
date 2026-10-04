@@ -262,4 +262,4 @@ PoolMaintenance::reclassify(const std::string& pool_id, const ClassRef& cls) {
     return Reclassify::Done;
 }
 
-} // namespace prime
+}

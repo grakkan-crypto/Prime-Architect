@@ -14,10 +14,6 @@ namespace prime {
 
 namespace {
 
-// The OS's allocation granularity. On Windows this is dwAllocationGranularity
-// (64KB on every current target); elsewhere it is the page size. Asking the OS
-// rather than hardcoding it is deliberate — this is the one number in the
-// allocator that is a hardware fact rather than a decision.
 uint64_t os_granularity() {
 #if defined(_WIN32)
     SYSTEM_INFO si{};
@@ -44,14 +40,14 @@ uint8_t* os_acquire(uint64_t bytes) {
 
 void os_release(uint8_t* p, uint64_t bytes) {
 #if defined(_WIN32)
-    (void)bytes; // MEM_RELEASE requires size 0 and frees the whole reservation
+    (void)bytes;
     VirtualFree(p, 0, MEM_RELEASE);
 #else
     munmap(p, static_cast<size_t>(bytes));
 #endif
 }
 
-} // namespace
+}
 
 MemoryAllocator::MemoryAllocator(uint64_t commit_ceiling)
     : granularity_(os_granularity()),
@@ -70,17 +66,14 @@ uint8_t* MemoryAllocator::acquire(uint64_t block_size) {
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        // The one limit in the system, checked in the one place it lives. A
-        // caller past the ceiling has run out of VRAM; it is told so plainly
-        // rather than handed something smaller than it asked for.
+
         if (committed_total_ + block_size > commit_ceiling_) return nullptr;
         committed_total_ += block_size;
     }
 
     uint8_t* p = os_acquire(block_size);
     if (p == nullptr) {
-        // The OS refused despite the ceiling allowing it. Unwind the charge so
-        // the accounting stays exact — a failed acquisition must leave no trace.
+
         std::lock_guard<std::mutex> lock(mutex_);
         committed_total_ -= block_size;
         return nullptr;
@@ -94,9 +87,7 @@ void MemoryAllocator::release(uint8_t* block, uint64_t block_size) {
     os_release(block, block_size);
 
     std::lock_guard<std::mutex> lock(mutex_);
-    // Uncharged immediately, not on some later sweep: the whole point of the
-    // block model is that memory a pool has finished with is available to the
-    // next pool that asks, right now.
+
     committed_total_ -= block_size;
 }
 
@@ -105,4 +96,4 @@ uint64_t MemoryAllocator::total_committed() const {
     return committed_total_;
 }
 
-} // namespace prime
+}

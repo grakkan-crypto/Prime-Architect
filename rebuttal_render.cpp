@@ -19,15 +19,12 @@ void RebuttalRender::toggle_expanded(const TurnId& turn) {
 }
 
 void RebuttalRender::draw() {
-    // Presence is visibility. No open rebuttals, no window.
+
     if (!host_.any_open()) {
         expanded_.clear();
         return;
     }
 
-    // Hover top-right of the viewport, inset from the exact corner. Auto-resize
-    // gives the down-per-line and stretch-to-fit-summary behaviour for free —
-    // the window is only ever as big as its lines.
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(
         ImVec2(vp->WorkPos.x + vp->WorkSize.x - 24.0f, vp->WorkPos.y + 48.0f),
@@ -42,7 +39,6 @@ void RebuttalRender::draw() {
         return;
     }
 
-    // Snapshot ids up front: close mutates the live list mid-frame.
     std::vector<TurnId> order;
     for (const auto& l : host_.lines()) order.push_back(l.turn);
 
@@ -54,31 +50,25 @@ void RebuttalRender::draw() {
 
         ImGui::PushID(id.value.c_str());
 
-        // The line's own bold attribute — painted by the host at playback
-        // start. One emphasised visual unit, controls included. Colour stands
-        // in for weight until the temporary UI is replaced.
         if (line->bold)
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
 
-        // Expand control.
         const bool open = expanded(id);
         if (ImGui::SmallButton(open ? "v" : ">")) toggle_expanded(id);
         ImGui::SameLine();
 
         ImGui::TextUnformatted(line->subject.c_str());
 
-        // Dismiss cross — through the host; a system action, not a draw one.
         ImGui::SameLine();
         if (ImGui::SmallButton("x")) {
             if (line->bold) ImGui::PopStyleColor();
             ImGui::PopID();
             host_.dismiss(id);
-            continue; // line gone; the list re-reads live next frame
+            continue;
         }
 
         if (line->bold) ImGui::PopStyleColor();
 
-        // Expanded: this rebuttal's recorded inputs, indented beneath its line.
         if (open) {
             const auto* inputs = host_.inputs_for(id);
             if (inputs != nullptr) {
@@ -95,4 +85,4 @@ void RebuttalRender::draw() {
     ImGui::End();
 }
 
-} // namespace prime::frontend
+}

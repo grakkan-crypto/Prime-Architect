@@ -85,4 +85,4 @@ void DiagnosticsPanelRender::draw_journey() {
     ImGui::EndChild();
 }
 
-} // namespace prime
+}

@@ -34,8 +34,6 @@ public:
                 AbortFn                          abort,
                 AnswerQuestionFn                 answer_question);
 
-    // `busy` is worked out once by the host from this pipeline's agent roster,
-    // and shared with the liveness bar — this layer doesn't work it out itself.
     void draw(bool busy);
 
 private:
@@ -51,4 +49,4 @@ private:
     bool     had_text_last_frame_ = false;
 };
 
-} // namespace prime
+}

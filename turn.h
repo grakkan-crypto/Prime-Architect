@@ -89,49 +89,35 @@ class LiveRegistry;
 
 class Turn {
 public:
-    // Registers with the switch (on_rebuttal_switch) — the push is how Turn
-    // learns the handover has ended.
+
     Turn(KvPoolAllocator& kv, PoolManipulation& pools, LiveRegistry& registry);
 
     Turn(const Turn&)            = delete;
     Turn& operator=(const Turn&) = delete;
 
-    // First input. Mints and returns the turn id — the whole act of opening.
     std::string open();
 
-    // The interrupt. The look (busy fact), the winddown snapshot if busy,
-    // then the flip. A no-op while rebuttal is already active — subsequent
-    // interrupts are RebuttalTurn's own.
     void interrupt();
 
-    // One pass of Turn's own watch: the completion signals read off the
-    // pools directly — ordinary completions close, Auditor_Output's
-    // completion holds.
     void watch();
 
-    // The human decision arriving (Aux delivers — deferred). Receiving side.
     void reject(const std::string& turn_id);
     void write(const std::string& turn_id);
     void edit(const std::string& turn_id);
 
 private:
-    // The resolution — the ruled sequence in the header block.
+
     void sc_teardown(const std::string& closing_turn_id);
 
-    // Trailing numeric counter of a turn id; absent/unparsable reads 0.
     static uint64_t ordinal_of(const std::string& turn_id);
 
     KvPoolAllocator&  kv_;
     PoolManipulation& pools_;
     LiveRegistry&     registry_;
 
-    // Pushed by the switch (on_rebuttal_switch). Never polled.
     bool rebuttal_active_ = false;
 
-    // THE ONE EXCEPTION: built once at the pre-flip instant, worked to zero,
-    // never rescanned, never added to, dropped on switch-off. Empty at all
-    // other times.
     std::vector<std::string> winddown_;
 };
 
-} // namespace prime
+}

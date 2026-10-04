@@ -33,18 +33,14 @@ public:
     GgufParser(const GgufParser&) = delete;
     GgufParser& operator=(const GgufParser&) = delete;
 
-    // Load (or return the already-mapped) region for this path. Thread-safe.
-    // Throws std::runtime_error on a malformed file or a mapping failure.
     WeightRegion* load(const std::string& path);
 
-    // Drop one reference. The mapping is released when the count hits zero.
     void release(const std::string& path);
 
-    // Diagnostic: how many distinct files are currently mapped.
     size_t mapped_count() const;
 
 private:
-    struct Mapping;  // platform-specific handles (POSIX fd + mmap view)
+    struct Mapping;
 
     std::unique_ptr<Mapping> open_mapping(const std::string& path);
     void  parse(WeightRegion& region, const Mapping& m);
@@ -55,7 +51,7 @@ private:
     };
 
     mutable std::mutex                                  mutex_;
-    std::unordered_map<std::string, std::unique_ptr<Entry>> entries_;  // keyed by canonical path
+    std::unordered_map<std::string, std::unique_ptr<Entry>> entries_;
 };
 
-} // namespace prime
+}

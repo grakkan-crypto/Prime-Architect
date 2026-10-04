@@ -14,9 +14,6 @@ namespace prime {
 
 namespace {
 
-// Does this name carry a Rules/Directives root word? Uppercased, then a
-// plain contains — casing, separators, order, and suffixes fall away. A
-// name check against two fixed roots, not a meaning check.
 bool is_rules_directives_name(const std::string& name) {
     std::string upper;
     upper.reserve(name.size());
@@ -27,11 +24,7 @@ bool is_rules_directives_name(const std::string& name) {
     return false;
 }
 
-} // namespace
-
-// ---------------------------------------------------------------------------
-// The standing declaration — data, read directly by whoever hands over.
-// ---------------------------------------------------------------------------
+}
 
 const std::vector<std::string> LiveRegistry::declared_needs = {
     payload_categories::kPipelineName,
@@ -39,15 +32,9 @@ const std::vector<std::string> LiveRegistry::declared_needs = {
     payload_categories::kPools,
 };
 
-// ---------------------------------------------------------------------------
-// The pipeline, landed in one motion
-// ---------------------------------------------------------------------------
-
 void LiveRegistry::store_pipeline(const std::string& pipeline_name,
                                   const PipelinePayload& payload) {
-    // The new state is built outside the lock, before anything held is
-    // touched. Whether this succeeds or throws changes nothing about what
-    // happens next: the old pipeline comes down regardless.
+
     std::vector<std::string> roster;
     std::vector<LivePool>    table;
     bool built = true;
@@ -55,9 +42,6 @@ void LiveRegistry::store_pipeline(const std::string& pipeline_name,
     try {
         roster = payload.roster;
 
-        // ---- the fixed slots, first ------------------------------------
-        // Shared context: found by name, wherever it sits in the incoming
-        // table, and carried across verbatim with id 1.
         for (const auto& declared : payload.pools) {
             if (declared.name != kSharedContextPoolName) continue;
             LivePool p;
@@ -67,9 +51,6 @@ void LiveRegistry::store_pipeline(const std::string& pipeline_name,
             break;
         }
 
-        // Rules/Directives: always id 2, whether or not the incoming table
-        // names it. The entry exists so the id can be found; its
-        // permissions are the Rules file's ruling, not this table's.
         {
             LivePool p;
             p.class_id         = kRulesDirectivesClassId;
@@ -77,9 +58,6 @@ void LiveRegistry::store_pipeline(const std::string& pipeline_name,
             table.push_back(std::move(p));
         }
 
-        // ---- everything the pipeline declares, numbered from 3 ----------
-        // Top to bottom, stepping over the two fixed names. The counter
-        // knows nothing about what it is counting.
         std::uint64_t next = kFirstDeclaredClassId;
         for (const auto& declared : payload.pools) {
             if (declared.name == kSharedContextPoolName) continue;
@@ -96,11 +74,6 @@ void LiveRegistry::store_pipeline(const std::string& pipeline_name,
     const size_t expected_pools  = table.size();
     const size_t expected_roster = roster.size();
 
-    // ---- OLD STATE DOWN — UNCONDITIONAL, ALWAYS FIRST ----------------------
-    // A failed landing does not mean the old pipeline is still true. Nothing
-    // is left standing that could be mistaken for current while a failure
-    // is being worked out: this whiteboard reads as unloaded until a new
-    // landing actually succeeds.
     bool wellness_check_pipeline_landed = false;
     {
         std::lock_guard<std::mutex> lock(pipeline_mutex_);
@@ -115,7 +88,6 @@ void LiveRegistry::store_pipeline(const std::string& pipeline_name,
             roster_        = std::move(roster);
             pools_         = std::move(table);
 
-            // The transference check: what is now held is what was handed.
             wellness_check_pipeline_landed =
                 pipeline_name_ == pipeline_name &&
                 roster_.size() == expected_roster &&
@@ -124,18 +96,11 @@ void LiveRegistry::store_pipeline(const std::string& pipeline_name,
     }
     (void)wellness_check_pipeline_landed;
 
-    // Prompt links belong to the pipeline that generated them. A landing
-    // makes every one of them meaningless, win or lose — cleared every
-    // time this fires, not only on success.
     {
         std::lock_guard<std::mutex> lock(links_mutex_);
         prompt_links_.clear();
     }
 }
-
-// ---------------------------------------------------------------------------
-// Identity
-// ---------------------------------------------------------------------------
 
 std::string LiveRegistry::pipeline_name() const {
     std::lock_guard<std::mutex> lock(pipeline_mutex_);
@@ -147,18 +112,10 @@ bool LiveRegistry::loaded() const {
     return !pipeline_name_.empty();
 }
 
-// ---------------------------------------------------------------------------
-// Roster
-// ---------------------------------------------------------------------------
-
 std::vector<std::string> LiveRegistry::agent_names() const {
     std::lock_guard<std::mutex> lock(pipeline_mutex_);
     return roster_;
 }
-
-// ---------------------------------------------------------------------------
-// Pools — class ids and permissions, read straight off the held table
-// ---------------------------------------------------------------------------
 
 std::vector<LivePool> LiveRegistry::pools() const {
     std::lock_guard<std::mutex> lock(pipeline_mutex_);
@@ -167,8 +124,7 @@ std::vector<LivePool> LiveRegistry::pools() const {
 
 std::optional<LivePool> LiveRegistry::pool(const std::string& name) const {
     std::lock_guard<std::mutex> lock(pipeline_mutex_);
-    // Any accepted form of the Rules/Directives name resolves to the fixed
-    // slot, whatever name that slot is held under.
+
     if (is_rules_directives_name(name)) {
         for (const auto& p : pools_)
             if (p.class_id == kRulesDirectivesClassId) return p;
@@ -184,12 +140,8 @@ std::uint64_t LiveRegistry::class_id_for(const std::string& name) const {
     if (is_rules_directives_name(name)) return kRulesDirectivesClassId;
     for (const auto& p : pools_)
         if (p.declaration.name == name) return p.class_id;
-    return 0; // not a class here
+    return 0;
 }
-
-// ---------------------------------------------------------------------------
-// Temperature — held here, written onto here, never worked out here.
-// ---------------------------------------------------------------------------
 
 std::vector<LiveTemperature> LiveRegistry::temperatures() const {
     std::lock_guard<std::mutex> lock(pipeline_mutex_);
@@ -228,15 +180,10 @@ void LiveRegistry::acknowledge_defaults() {
     for (auto& e : temperatures_) e.is_default = false;
 }
 
-// ---------------------------------------------------------------------------
-// Rebuttal switch — the one switch, and its cascade.
-// ---------------------------------------------------------------------------
-
 void LiveRegistry::set_rebuttal_active(bool active) {
     const bool was = rebuttal_active_.exchange(active, std::memory_order_acq_rel);
-    if (was == active) return; // no change — no signal; recipients assume no change
+    if (was == active) return;
 
-    // Told on change, outside any lock: the switch telling the files.
     std::vector<std::function<void(bool)>> signals;
     {
         std::lock_guard<std::mutex> lock(rebuttal_signal_mutex_);
@@ -253,10 +200,6 @@ void LiveRegistry::on_rebuttal_switch(std::function<void(bool active)> signal) {
     std::lock_guard<std::mutex> lock(rebuttal_signal_mutex_);
     rebuttal_signals_.push_back(std::move(signal));
 }
-
-// ---------------------------------------------------------------------------
-// Prompt links — standing memory, whole-set writes only.
-// ---------------------------------------------------------------------------
 
 void LiveRegistry::link_prompt(const std::string& prompt_id,
                                std::vector<std::string> linked_pool_ids) {
@@ -275,19 +218,13 @@ void LiveRegistry::unlink_prompt(const std::string& prompt_id) {
     prompt_links_.erase(prompt_id);
 }
 
-// ---------------------------------------------------------------------------
-// The one live instance
-// ---------------------------------------------------------------------------
-
 namespace {
-// Created at system load, static storage: it is there before any pipeline
-// is, and stays for the life of the process. Nothing about a pipeline
-// brings it into being.
+
 LiveRegistry the_one;
-} // namespace
+}
 
 LiveRegistry& live_registry() {
     return the_one;
 }
 
-} // namespace prime
+}

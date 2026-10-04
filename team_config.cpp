@@ -26,7 +26,7 @@ std::string mint_id(const std::string& prefix) {
     return prefix + "_" + suffix;
 }
 
-} // namespace
+}
 
 namespace split_policy {
 
@@ -41,11 +41,8 @@ std::string split_name_for(const std::string& base, int k) {
     return base + "-Split" + std::to_string(k);
 }
 
-} // namespace split_policy
+}
 
-// ---------------------------------------------------------------------------
-// Lookup
-// ---------------------------------------------------------------------------
 void TeamConfig::set_teams(std::vector<TeamEntry> teams) {
     teams_ = std::move(teams);
 }
@@ -101,9 +98,6 @@ TeamConfig::generating_members(const std::vector<std::string>& roster,
     return out;
 }
 
-// ---------------------------------------------------------------------------
-// Authoring
-// ---------------------------------------------------------------------------
 TeamEntry TeamConfig::create_team(const std::string& name,
                                   const std::string& department) {
     TeamEntry t;
@@ -126,7 +120,6 @@ TeamConfig::check_eligibility(const TeamEntry& team,
         != team.roster.end())
         return AddMemberResult::AlreadyPresent;
 
-    // The team's own department, plus Arbiter. Nothing else.
     const bool in_department = (candidate.department == team.department);
     const bool is_arbiter    = (candidate.department == kArbiter);
     if (!in_department && !is_arbiter)
@@ -154,9 +147,6 @@ TeamConfig::add_member(const std::string& team_id,
 
     t->roster.push_back(candidate.name);
 
-    // A membership change changes N. The duplicates follow immediately, so the
-    // roster and the fusions derived from it are never two states a caller has
-    // to remember to reconcile.
     resync_splits(resolve);
     return verdict;
 }
@@ -207,9 +197,7 @@ bool TeamConfig::delete_team(const std::string& team_id) {
 
 int TeamConfig::apply_rename(const std::string& old_name,
                              const std::string& new_name) {
-    // Duplicates hold the same member names as their parent, so both are
-    // rewritten by the same pass. There is no separate set of generated agent
-    // names to repoint, because none were ever created.
+
     int rewritten = 0;
     for (auto& t : teams_)
         for (auto& member : t.roster)
@@ -220,13 +208,8 @@ int TeamConfig::apply_rename(const std::string& old_name,
     return rewritten;
 }
 
-// ---------------------------------------------------------------------------
-// Split synchronisation
-// ---------------------------------------------------------------------------
 void TeamConfig::resync_splits(const DepartmentResolver& resolve) {
-    // Snapshot the parents first: rebuild and drop both mutate teams_, so
-    // iterating it directly would be walking a vector being appended to and
-    // erased from underneath.
+
     std::vector<TeamEntry> parents;
     for (const auto& t : teams_)
         if (!t.is_split()) parents.push_back(t);
@@ -240,8 +223,6 @@ void TeamConfig::resync_splits(const DepartmentResolver& resolve) {
         else          drop_splits_for(parent.name);
     }
 
-    // A duplicate whose parent no longer exists is orphaned. Drop it, so nothing
-    // is left pointing at a name that does not resolve.
     std::unordered_set<std::string> live;
     for (const auto& t : teams_)
         if (!t.is_split()) live.insert(t.name);
@@ -257,15 +238,10 @@ void TeamConfig::resync_splits(const DepartmentResolver& resolve) {
 
 void TeamConfig::rebuild_splits_for(const TeamEntry& parent,
                                     const DepartmentResolver& resolve) {
-    // N comes out of the roster. A team with three generating members has N == 3
-    // because it has three, not because a 3 was recorded somewhere that could
-    // fall out of step.
+
     const auto generating = generating_members(parent.roster, resolve);
     const int n = static_cast<int>(generating.size());
 
-    // Rebuilt from nothing rather than diffed. Cheaper to reason about, and the
-    // only way the result is guaranteed to match the parent rather than to match
-    // whatever the last diff believed.
     drop_splits_for(parent.name);
 
     if (n == 0) return;
@@ -279,14 +255,6 @@ void TeamConfig::rebuild_splits_for(const TeamEntry& parent,
         dup.split_enabled = false;
         dup.parent        = parent.name;
 
-        // The parent's roster, verbatim. THE SAME AGENTS — the same names, the
-        // same entries, the same single set of loaded weights. Nothing here
-        // creates, copies, or renames an agent; an agent simply belongs to more
-        // than one fusion at once.
-        //
-        // Every member comes across, including any Arbiter. The generating count
-        // decided how many duplicates exist; it does not decide what is inside
-        // one, and a fusion without its veto seat is a different fusion.
         dup.roster = parent.roster;
 
         teams_.push_back(std::move(dup));
@@ -294,11 +262,11 @@ void TeamConfig::rebuild_splits_for(const TeamEntry& parent,
 }
 
 void TeamConfig::drop_splits_for(const std::string& parent_name) {
-    // Teams only. There is nothing else to remove.
+
     teams_.erase(
         std::remove_if(teams_.begin(), teams_.end(),
                        [&](const TeamEntry& t) { return t.parent == parent_name; }),
         teams_.end());
 }
 
-} // namespace prime
+}

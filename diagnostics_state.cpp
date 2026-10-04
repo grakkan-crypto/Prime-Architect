@@ -4,9 +4,6 @@
 
 namespace prime::frontend {
 
-// ---------------------------------------------------------------------------
-// DiagnosticsLog
-// ---------------------------------------------------------------------------
 void DiagnosticsLog::write(const std::string& text, bool is_error) {
     std::lock_guard<std::mutex> lock(mutex_);
     lines_.push_back(DiagnosticsLine{text, is_error});
@@ -28,9 +25,6 @@ void DiagnosticsLog::clear() {
     lines_.clear();
 }
 
-// ---------------------------------------------------------------------------
-// JourneyLog
-// ---------------------------------------------------------------------------
 void JourneyLog::append(const JourneyEntry& entry) {
     std::lock_guard<std::mutex> lock(mutex_);
     entries_.push_back(entry);
@@ -58,4 +52,4 @@ void JourneyLog::clear() {
     entries_.clear();
 }
 
-} // namespace prime::frontend
+}

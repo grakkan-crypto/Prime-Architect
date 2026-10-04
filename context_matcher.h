@@ -50,36 +50,24 @@
 
 namespace prime {
 
-// One generated token's attention to one Class 1 pool, and the pool's
-// length in tokens.
 struct PoolAttention {
     std::string   pool_id;
     std::uint64_t tokens = 0;
     float         weight = 0.0f;
 };
 
-// One generated token's Class 1 attention: its total to Class 1, its
-// attention to each Class 1 pool, and whether this step produced the stop
-// token.
 struct AttentionStep {
     float                      class_total = 0.0f;
     std::vector<PoolAttention> pools;
     bool                       stop_token  = false;
 };
 
-// Registers one Watcher request per input pool the registry knows.
 void ContextMatcher_Watch();
 
-// Watcher's recipient: the request's name and message. The mechanical
-// receipt goes back at once.
 bool ContextMatcher_Receive(const std::string& name, const std::string& message);
 
-// One generation step's Class 1 attention, delivered as it is produced and
-// evaluated per token.
 void ContextMatcher_Evaluate(const AttentionStep& step);
 
-// The prompt IDs of an ended interaction, as read off its migrating output
-// pool. Each one's row is removed from LiveRegistry's prompt links.
 void ContextMatcher_Release(const std::vector<std::string>& prompt_ids);
 
-} // namespace prime
+}

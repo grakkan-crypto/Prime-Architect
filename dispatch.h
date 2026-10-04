@@ -30,7 +30,7 @@
 
 #pragma once
 
-#include "../prime_types.h"   // PrimeToken — the unit a TokenSink carries
+#include "../prime_types.h"
 
 #include <cstdint>
 #include <functional>
@@ -38,136 +38,73 @@
 
 namespace prime {
 
-// ---------------------------------------------------------------------------
-// Department I/O contract — fixed per department (SPEC_Prime_Specialist_Dispatch
-// §3). Determines the shape of input and output, never changes with the model.
-// ---------------------------------------------------------------------------
 enum class Contract {
-    TextToText,    // all text departments (Analyst, Architect, Arbiter, ...)
-    TextToImage,   // Artist
-    TextToVideo,   // Artisan
-    ImageToText,   // Aperture
-    AudioToText,   // Accord
-    TextToAudio,   // Announcer
+    TextToText,
+    TextToImage,
+    TextToVideo,
+    ImageToText,
+    AudioToText,
+    TextToAudio,
     Unknown
 };
 
-// Resolve a department name to its contract. Unlisted names are text
-// departments (text->text) — the engine holds no opinion on what a text
-// department is for. Aether is not handled here; it has its own quarantine path.
 Contract contract_from_department(const std::string& department);
 const char* contract_name(Contract c);
 
-// ---------------------------------------------------------------------------
-// Model format — how the weights are packaged. Detected from the model path
-// (SPEC_Prime_Specialist_Dispatch §5).
-// ---------------------------------------------------------------------------
 enum class ModelFormat {
-    Gguf,     // single .gguf file
-    Onnx,     // .onnx file or package directory
-    Hybrid,   // NPU+RDNA partitioned package
-    Pipeline, // multi-stage specialist package — diffusion, Whisper, TTS.
-              // NOT a single weight file: a directory of components the kernel
-              // layer runs as a pipeline (scheduler/UNet/VAE/CLIP, encoder/
-              // decoder, etc). The weight store does not GGUF-map these; the
-              // dispatch layer hands the package path to the specialist kernel.
+    Gguf,
+    Onnx,
+    Hybrid,
+    Pipeline,
+
     Unknown
 };
 
-// Detect format from a resolved model path. Inspects extension, then directory
-// contents for a directory path. Returns Unknown for an unrecognised package;
-// the caller rejects the load with a diagnostic rather than guessing.
 ModelFormat detect_format(const std::string& model_path);
 const char* format_name(ModelFormat f);
 
-// ---------------------------------------------------------------------------
-// Compute target — where the model runs. Declared by the frontend per slot.
-// The engine enforces no format-to-target constraint; the kernel layer is
-// written to support all formats on all targets.
-// ---------------------------------------------------------------------------
 enum class ComputeTarget {
-    RDNA,     // gfx1151 GPU compute
-    XDNA,     // XDNA 2 NPU
-    Hybrid,   // NPU + RDNA simultaneously
+    RDNA,
+    XDNA,
+    Hybrid,
     Unknown
 };
 
 ComputeTarget target_from_string(const std::string& s);
 const char* target_name(ComputeTarget t);
 
-// ---------------------------------------------------------------------------
-// Dispatch status — the result class of any kernel call. BadInput remains
-// available for a SPECIFIC KernelBackend implementation to return about ITS OWN
-// requirements (e.g. a VLM implementation that genuinely cannot proceed without
-// a file path) — it is no longer imposed generically before the kernel is ever
-// reached.
-// ---------------------------------------------------------------------------
 enum class DispatchStatus {
     Ok,
-    KernelUnavailable,    // no kernel implementation bound for this path yet
-    UnsupportedContract,  // backend does not implement this contract
-    BadInput,             // this model's own requirements were not met
-    ModelError            // model failed to execute
+    KernelUnavailable,
+    UnsupportedContract,
+    BadInput,
+    ModelError
 };
 
 const char* status_name(DispatchStatus s);
 
-// ---------------------------------------------------------------------------
-// Request and result payloads.
-//
-// NO PROMPT STRING. A resident agent's text input is not carried here and never
-// was meant to be: the agent reads whatever its pools currently expose to it,
-// under the access mask compiled for the loaded pipeline. `agent_name` and
-// `token_handle` identify WHICH resident agent is stepping; the kernel resolves
-// that agent's readable pools through the bound access table.
-//
-// `media_input_path` remains for the models that use it — a real file on disk
-// handed to a specific specialist is an external artefact, not conversation.
-// Its presence or absence is that model's own business, not a rule enforced
-// here (see header note).
-// ---------------------------------------------------------------------------
 struct DispatchRequest {
     Contract      contract = Contract::Unknown;
     ModelFormat   format   = ModelFormat::Unknown;
     ComputeTarget target   = ComputeTarget::RDNA;
 
-    std::string   model_path;        // resolved, validated path to the model
-    std::string   agent_name;        // resident agent this step belongs to
-    uint32_t      token_handle = 0;  // its slot handle; 0 == unset (invalid)
-    std::string   media_input_path;  // for the models that use one
+    std::string   model_path;
+    std::string   agent_name;
+    uint32_t      token_handle = 0;
+    std::string   media_input_path;
 
-    // Generation parameters. Zero temperature means "use the model/agent default"
-    // resolved upstream — the engine hardcodes nothing (SPEC_Prime_Specialist_
-    // Dispatch §7.1). There is no token cap: an agent generates what it needs and
-    // extends its own pool on demand; generation is bounded by the work, not by a
-    // count the engine imposes.
-    double        temperature = 0.0; // 0 == model/agent default applies upstream
+    double        temperature = 0.0;
 };
 
-// For streaming text, tokens are delivered through this sink as they generate.
-// The sink receives the full PrimeToken (id, confidence, all seven inflection
-// axes, source slot) AND its decoded text. Both travel together — the coordinate
-// data is never dropped at this boundary. Returns false to abort generation
-// (client gone). Calls that don't stream ignore the sink.
 using TokenSink = std::function<bool(const PrimeToken& token, const std::string& text)>;
 
 struct DispatchResult {
     DispatchStatus status = DispatchStatus::KernelUnavailable;
-    std::string    text_output;        // text-out contracts
-    std::string    media_output_path;  // media-out contracts (image/video/audio)
-    std::string    detail;             // human-readable status detail / error
+    std::string    text_output;
+    std::string    media_output_path;
+    std::string    detail;
 };
 
-// ---------------------------------------------------------------------------
-// KernelBackend — THE SEAM. Prime_Power implements this. Each method covers one
-// family of contracts. A backend implements what it covers and returns
-// KernelUnavailable / UnsupportedContract for the rest.
-//
-//   generate_text     TextToText            (streaming via TokenSink)
-//   generate_media    TextToImage/Video     (one-shot -> media_output_path)
-//   understand        ImageToText/AudioToText (one-shot -> text_output)
-//   synthesize_speech TextToAudio           (one-shot -> media_output_path)
-// ---------------------------------------------------------------------------
 class KernelBackend {
 public:
     virtual ~KernelBackend() = default;
@@ -178,11 +115,6 @@ public:
     virtual DispatchResult synthesize_speech(const DispatchRequest& req) = 0;
 };
 
-// ---------------------------------------------------------------------------
-// StubKernelBackend — the placeholder bound until Prime_Power is ready. Every
-// call returns KernelUnavailable with a clear detail string naming the contract,
-// format, and target that was requested.
-// ---------------------------------------------------------------------------
 class StubKernelBackend : public KernelBackend {
 public:
     DispatchResult generate_text(const DispatchRequest& req, const TokenSink& sink) override;
@@ -191,19 +123,8 @@ public:
     DispatchResult synthesize_speech(const DispatchRequest& req) override;
 };
 
-// ---------------------------------------------------------------------------
-// KernelCall — a resolved, uniform-signature call onto ONE KernelBackend
-// method. Every contract maps to exactly one of these, always; the mapping is
-// a fixed fact, not a per-request decision. `sink` is ignored by calls that
-// don't stream — that is the adapter's job, not the caller's.
-// ---------------------------------------------------------------------------
 using KernelCall = DispatchResult(*)(KernelBackend&, const DispatchRequest&, const TokenSink&);
 
-// Resolve which KernelBackend method a contract binds to. Called ONCE per slot,
-// at pipeline_routes.cpp's bind_fleet() — never at generation time. Returns
-// nullptr for Contract::Unknown; a slot bound with an unknown contract is an
-// unresolved slot, and the caller must treat a null kernel_call as loud, not
-// silently skip the call.
 KernelCall kernel_call_for(Contract c);
 
-} // namespace prime
+}

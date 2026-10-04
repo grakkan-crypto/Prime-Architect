@@ -5,10 +5,7 @@
 namespace prime {
 
 namespace {
-    // Session marker: hex of a session-local static's address — stable for the
-    // process, distinct across processes, no clock dependency. The exact
-    // mechanism TurnBook used; moved here unchanged because this is now the
-    // one place identity comes from.
+
     std::string make_session_marker() {
         static const int anchor = 0;
         auto p = reinterpret_cast<uintptr_t>(&anchor);
@@ -28,9 +25,7 @@ IdGeneration& IdGeneration::instance() {
 }
 
 IdGeneration::IdGeneration() : session_(make_session_marker()) {
-    // Prompt ids start from a session-derived offset inside the 24-bit space so
-    // two sessions do not both begin at 000000. Identity still never depends on
-    // a clock — the offset is folded from the same address-derived marker.
+
     uint64_t fold = 0;
     for (char c : session_) fold = fold * 31u + (unsigned char)c;
     prompt_offset_ = fold & 0xFFFFFFull;
@@ -61,4 +56,4 @@ std::string IdGeneration::mint_pool_id() {
     return v;
 }
 
-} // namespace prime
+}

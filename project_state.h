@@ -34,9 +34,6 @@
 
 namespace prime::frontend {
 
-// The currently-open project. path is the identity used for the read-only gate,
-// storage keying, and workspace restore. read_only gates whether writes are
-// permitted against this project's files.
 struct ActiveProject {
     std::string name;
     std::string path;
@@ -45,14 +42,10 @@ struct ActiveProject {
     bool loaded() const { return !path.empty(); }
 };
 
-// Pipeline identity plus the active project it operates on. Established on
-// pipeline load, cleared on unload. Holds the file buffer for the open project
-// as the baseline other layers read (audit, read-only checks).
 class ProjectState {
 public:
     ProjectState() = default;
 
-    // --- PIPELINE IDENTITY ---
     void set_pipeline(const std::string& pipeline_name,
                       const std::string& config_path,
                       const std::string& storage_root);
@@ -62,27 +55,23 @@ public:
     const std::string& storage_root()  const { return storage_root_; }
     bool               has_pipeline()  const { return !pipeline_name_.empty(); }
 
-    // --- ACTIVE PROJECT ---
     void open_project(const std::string& name, const std::string& path,
                       bool read_only);
     const ActiveProject& project() const { return project_; }
 
-    // The loaded project's file content — the baseline the audit path and the
-    // read-only gate read. nullopt until content is loaded for the open project.
     void set_file_buffer(std::string content);
     void clear_file_buffer();
     const std::optional<std::string>& file_buffer() const { return file_buffer_; }
 
-    // Drop pipeline identity, project, and buffer on unload.
     void clear();
 
 private:
-    std::string   pipeline_name_;   // matrix file name (identity, not a path)
-    std::string   config_path_;     // stamped config.json
-    std::string   storage_root_;    // disk path for per-pipeline files
+    std::string   pipeline_name_;
+    std::string   config_path_;
+    std::string   storage_root_;
 
     ActiveProject               project_;
     std::optional<std::string>  file_buffer_;
 };
 
-} // namespace prime::frontend
+}

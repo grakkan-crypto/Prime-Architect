@@ -1,7 +1,7 @@
 // chat_rag.cpp — Chat RAG: the physical structure. See chat_rag.h for design.
 
 #include "chat_rag.h"
-#include "id_registry.h"     // reserved::kDeleted
+#include "id_registry.h"
 #include "rag_persistence.h"
 
 #include <algorithm>
@@ -18,8 +18,8 @@ static float cosine_distance(const std::vector<float>& a,
         na  += static_cast<double>(a[i]) * a[i];
         nb  += static_cast<double>(b[i]) * b[i];
     }
-    if (na == 0.0 || nb == 0.0) return 1.0f; // zero vector matches nothing;
-                                             // reported as distant, not error
+    if (na == 0.0 || nb == 0.0) return 1.0f;
+
     return 1.0f - static_cast<float>(dot / (std::sqrt(na) * std::sqrt(nb)));
 }
 
@@ -28,13 +28,11 @@ bool ChatRag::open(RagPersistence& persistence, std::string& reason_out) {
     std::vector<LifecycleEvent> events;
     std::vector<ExpiryRecord>   expiries;
     if (!persistence.load_entries(entries, events, expiries, reason_out))
-        return false; // real read failure, reported — never "nothing yet"
+        return false;
 
     entries_  = std::move(entries);
     expiries_ = std::move(expiries);
 
-    // Replay lifecycle events in order — the append-only record of every
-    // cascade since the beginning. Entry state is derived, never stored twice.
     for (const LifecycleEvent& ev : events) {
         for (RagEntry& e : entries_) {
             if (e.thread_id == ev.thread_id) {
@@ -59,9 +57,7 @@ bool ChatRag::open(RagPersistence& persistence, std::string& reason_out) {
 
 std::optional<uint64_t> ChatRag::append(RagEntry entry,
                                         std::string& reason_out) {
-    // Span discipline: every span must lie inside the turn and cover a real
-    // stretch. A malformed span is refused whole — a boundary that lies about
-    // where the context ends would poison every fetch that ever matched it.
+
     for (const TagSpan& s : entry.spans) {
         if (s.begin >= s.end) {
             reason_out = "span with begin >= end refused";
@@ -86,8 +82,6 @@ std::optional<uint64_t> ChatRag::append(RagEntry entry,
         }
     }
 
-    // Voice-label discipline: same geometry rules, plus no two labels may
-    // overlap — speakers alternate; an overlap is a caller bug refused whole.
     for (size_t i = 0; i < entry.voices.size(); ++i) {
         const VoiceSpan& v = entry.voices[i];
         if (v.begin >= v.end) {
@@ -122,7 +116,7 @@ std::optional<uint64_t> ChatRag::append(RagEntry entry,
 
     if (persistence_ && !persistence_->append_entry(entry)) {
         reason_out = "persistence refused the entry append";
-        return std::nullopt; // memory untouched — no split truth
+        return std::nullopt;
     }
 
     entries_.push_back(std::move(entry));
@@ -142,9 +136,7 @@ bool ChatRag::turn_carries(const RagEntry& e, uint16_t concept_id) const {
 bool ChatRag::span_excluded(const RagEntry& e, const TagSpan& s,
                             const std::vector<uint16_t>& none_of) const {
     if (none_of.empty()) return false;
-    // Overlap-based, span-precise: a candidate span is dropped only where an
-    // excluded tag's span actually overlaps it — a live section of a turn
-    // survives its obsolete neighbour.
+
     for (const TagSpan& x : e.spans) {
         bool is_excluded_tag = false;
         for (uint16_t id : none_of)
@@ -159,8 +151,7 @@ bool ChatRag::span_excluded(const RagEntry& e, const TagSpan& s,
 bool ChatRag::span_voice_ok(const RagEntry& e, const TagSpan& s,
                             const TagQuery& q) const {
     if (!q.voice) return true;
-    // Narrowing only: the tag span must overlap a voice label of the asked
-    // voice. Voice alone never qualifies anything through this gate.
+
     for (const VoiceSpan& v : e.voices) {
         if (v.voice != *q.voice) continue;
         if (v.begin < s.end && s.begin < v.end) return true;
@@ -198,8 +189,6 @@ std::vector<SpanHit> ChatRag::find(const TagQuery& q,
             if (!any) continue;
         }
 
-        // Return the REQUESTED tags' spans — the exact context asked for,
-        // nothing before, nothing after.
         for (const TagSpan& s : e.spans) {
             bool requested = false;
             for (uint16_t id : q.all_of)
@@ -230,11 +219,6 @@ std::vector<SpanHit> ChatRag::nearest(const std::vector<float>& query,
         return out;
     }
 
-    // ---- PHASE 1: exact scan over spans of gate-passing turns.        ----
-    // ---- ANN SLOT: the Phase 2 approximate structure replaces ONLY    ----
-    // ---- the candidate walk below; contract identical (vector in,     ----
-    // ---- span hits out). Build behind this line when the pile has     ----
-    // ---- earned it; its index rebuild is a pre-staged watchdog job.   ----
     for (const RagEntry& e : entries_) {
         if (!gate(e)) continue;
         for (const TagSpan& s : e.spans) {
@@ -253,8 +237,7 @@ std::vector<SpanHit> ChatRag::nearest(const std::vector<float>& query,
 }
 
 const RagEntry* ChatRag::full_turn(uint64_t entry_id) const {
-    // The deliberate act: the complete original turn, untagged process and
-    // all — or nothing. Deleted turns stay behind the recall path.
+
     if (entry_id >= entries_.size()) return nullptr;
     const RagEntry& e = entries_[entry_id];
     if (e.lifecycle == reserved::kDeleted) return nullptr;
@@ -340,9 +323,7 @@ std::vector<SpanHit> ChatRag::recall_deleted(const TagQuery& q,
 std::vector<VoiceHit> ChatRag::voice_find(Voice v,
                                           std::optional<int64_t> from_ts,
                                           std::optional<int64_t> to_ts) const {
-    // GATE 2: voice is the sole qualification. Concept tags are irrelevant
-    // here — the turns this serves are precisely the ones that never earned
-    // one. Deleted stays behind the recall path, as everywhere.
+
     std::vector<VoiceHit> out;
     for (const RagEntry& e : entries_) {
         if (e.lifecycle == reserved::kDeleted) continue;
@@ -424,4 +405,4 @@ size_t ChatRag::pending_expiry_count() const {
     return n;
 }
 
-} // namespace prime::rag
+}

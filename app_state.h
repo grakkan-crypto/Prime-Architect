@@ -47,66 +47,42 @@
 #include <string>
 
 namespace prime {
-class EngineContext; // non-owning reference; engine is constructed elsewhere.
-                      // Forward-declared only — no path dependency here. When a
-                      // .cpp needs the real definition: frontend (Prime_Architect)
-                      // and backend (Prime_Engine) are SIBLING folders, so the
-                      // real include from anywhere in frontier/ is
-                      // "../../Prime_Engine/engine_context.h" (two levels up,
-                      // not one — sibling, not nested).
+class EngineContext;
+
 }
 
 namespace prime::frontend {
 
 class AppState {
 public:
-    // Bound to the engine it shares a process with. The reference is non-owning
-    // and must outlive this AppState.
+
     explicit AppState(prime::EngineContext& engine) : engine_(engine) {}
 
     AppState(const AppState&)            = delete;
     AppState& operator=(const AppState&) = delete;
 
-    // Direct engine access — a method call, not a transport. Rules, pipeline
-    // load/unload, and generation go through this reference. No interface sits
-    // between the frontend and the engine.
-    //
-    // Temperature is NOT among them: it never crosses this boundary in either
-    // direction. It is held above, in this object, and read from there.
     prime::EngineContext& engine() { return engine_; }
 
-    // State pieces. Each is a distinct concern with its own header; AppState only
-    // owns and exposes them.
     IngestionState&   ingestion()    { return ingestion_; }
 
-    // Authored temperatures. UI-OWNED — this is where they live, and the only
-    // place. The engine stores none, mirrors none, and is never asked for one.
-    // Replaces the old AgentRoster, whose two-values-per-agent model was wrong.
     TemperatureStore& temperatures()  { return temperatures_; }
     DiagnosticsLog&   diagnostics()   { return diagnostics_; }
     JourneyLog&       journey()       { return journey_; }
     ProjectState&     project()        { return project_; }
     ResidentContext&  resident()       { return resident_; }
 
-    // The currently-addressed agent (the frontend's human-facing selection).
     const std::string& current_agent() const { return current_agent_; }
     void set_current_agent(const std::string& name) { current_agent_ = name; }
 
-    // Abort flag for the in-flight turn. Held here because the inference layer
-    // takes it as std::atomic<bool>& (inference.h) and checks it per token; the
-    // UI raises it to abort. Lives on the umbrella because it is turn-scoped
-    // process state, not a property of any single piece above.
     std::atomic<bool>& abort_requested() { return abort_requested_; }
 
-    // Path to reach Prime Auxiliary / the Watchdog for undo and backup. Set at
-    // startup/pipeline load; read by the undo path. See header note.
     const std::string& auxiliary_socket_path() const { return auxiliary_socket_path_; }
     void set_auxiliary_socket_path(const std::string& path) {
         auxiliary_socket_path_ = path;
     }
 
 private:
-    prime::EngineContext& engine_;   // non-owning
+    prime::EngineContext& engine_;
 
     IngestionState   ingestion_;
     TemperatureStore temperatures_;
@@ -120,4 +96,4 @@ private:
     std::string       auxiliary_socket_path_;
 };
 
-} // namespace prime::frontend
+}

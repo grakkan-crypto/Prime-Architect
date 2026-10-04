@@ -11,15 +11,13 @@ namespace prime {
 
 namespace {
 
-// One department's contents. Ordered vectors — insertion order within a bucket
-// is preserved so a save with no edits reproduces the previous file.
 struct Bucket {
     std::vector<const AgentEntry*> agents;
     std::vector<const TeamEntry*>  teams;
 };
 
 void write_agent(std::ostringstream& o, const AgentEntry& a, const char* indent) {
-    // No department field: the bucket this sits in states it, once.
+
     o << indent << "{\n";
     o << indent << "  \"id\": \""          << escape_text(a.id)          << "\",\n";
     o << indent << "  \"name\": \""        << escape_text(a.name)        << "\",\n";
@@ -49,13 +47,11 @@ void write_team(std::ostringstream& o, const TeamEntry& t, const char* indent) {
     o << indent << "}";
 }
 
-} // namespace
+}
 
 std::string ConfigWriter::to_json(const std::vector<AgentEntry>& agents,
                                   const std::vector<TeamEntry>& teams) {
-    // std::map, not unordered: department order is alphabetical and stable
-    // across runs. A config that reorders itself on every save makes a diff
-    // useless for spotting a real change.
+
     std::map<std::string, Bucket> by_department;
 
     for (const auto& a : agents) by_department[a.department].agents.push_back(&a);
@@ -101,4 +97,4 @@ bool ConfigWriter::write(const std::string& config_path,
     return write_text_file(config_path, to_json(agents, teams));
 }
 
-} // namespace prime
+}

@@ -38,32 +38,26 @@ namespace prime {
 
 class IdGeneration {
 public:
-    // The process-wide instance. Reached directly wherever an id is needed —
-    // never constructed per-caller, never handed around as a parameter.
+
     static IdGeneration& instance();
 
     IdGeneration(const IdGeneration&)            = delete;
     IdGeneration& operator=(const IdGeneration&) = delete;
 
-    // A new turn id. "<session>-<n>".
     std::string mint_turn_id();
 
-    // A new prompt id. Six lowercase hex digits, unique within the session
-    // (24-bit space, session-offset start; wrapping sits far beyond any
-    // session's prompt count).
     std::string mint_prompt_id();
 
-    // A new pool id. "P<session>-<n>".
     std::string mint_pool_id();
 
 private:
     IdGeneration();
 
-    std::string           session_;        // per-process marker, set once
+    std::string           session_;
     std::atomic<uint64_t> next_turn_{0};
     std::atomic<uint64_t> next_prompt_{0};
     std::atomic<uint64_t> next_pool_{0};
-    uint64_t              prompt_offset_ = 0; // session-derived start point
+    uint64_t              prompt_offset_ = 0;
 };
 
-} // namespace prime
+}

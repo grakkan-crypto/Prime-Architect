@@ -39,7 +39,6 @@ void ChatRender::draw() {
             ImGui::Spacing();
         }
 
-        // Stay at the bottom unless the user has scrolled up to read back.
         if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f) {
             ImGui::SetScrollHereY(1.0f);
         }
@@ -47,4 +46,4 @@ void ChatRender::draw() {
     ImGui::EndChild();
 }
 
-} // namespace prime
+}
