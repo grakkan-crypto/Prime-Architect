@@ -61,6 +61,10 @@ An operation that already exists in a general form is called directly with the d
 
 ONE function per file. No Frankenstein files.
 
+## Only requested edits
+
+ONLY requested edits go into code. Gaps are left as they are, and mentioned. Any decision needed to implement the code is for the USER to make.
+
 ## Code
 
 Code is only to be given upon request. The user will request it when satisfied on alignment; do not prompt for it.

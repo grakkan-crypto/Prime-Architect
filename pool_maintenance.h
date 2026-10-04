@@ -65,14 +65,14 @@
 //
 // RAM
 //   Pool memory held is the VRAM part of the boot block and every stretch
-//   received since. Free is what is held less what pools are using. The
-//   rise is the net change in use, spawned less destroyed, over the last
-//   exchange's length of time. On every spawn and grow: free below the rise,
-//   the rise is asked for. The RAM Manager asks for RAM back by the same rule
-//   on its side; Pool Maintenance chooses which bytes go and never gives up
-//   bytes in use or its RAM part. Every exchange is posted to Wellness by
-//   both sides, and the exchange still happens. Continuity is required of
-//   the boot block alone.
+//   received since. Free is what is held less what pools are using. On a
+//   spawn or grow that free space cannot cover, the shortfall is asked for
+//   and the spawn or grow goes ahead. A RAM part with no room for a
+//   preserved section asks for that room, and the edit goes ahead. The RAM
+//   Manager asks for RAM back when it cannot cover what it needs; Pool
+//   Maintenance chooses which bytes go and never gives up bytes in use or its
+//   RAM part. Every exchange is posted to Wellness by both sides, and the
+//   exchange still happens. Continuity is required of the boot block alone.
 //
 // THE SCREEN
 //   When LiveRegistry starts up, whenever that is, it tells Pool
@@ -345,16 +345,13 @@ private:
     // flag and unflag — the one matcher.
     static bool matches(const Pool& p, const PoolFilter& f);
 
-    // One chunk from the OS onto the end of the pool; the rise checked and
-    // asked for. Caller holds the lock.
+    // One chunk from the OS onto the end of the pool; free space that cannot
+    // cover it is asked for. Caller holds the lock.
     bool take_chunk_locked(Pool& p);
 
-    // A change in pool use, folded into the rise. Caller holds the lock.
-    void use_locked(double delta);
-
     // The one edit, per section: preserved, redirected, edited in place,
-    // lifted. False: no preserved section could be taken; nothing edited.
-    // Caller holds the lock.
+    // lifted. A RAM part with no room asks the RAM Manager for it. Caller
+    // holds the lock.
     bool write_unit_locked(MapUnit& u, Pool next, bool present);
 
     // A preserved section with no reader and no redirect goes back to the
@@ -379,9 +376,6 @@ private:
     // Wholly this file's.
     std::vector<Stretch> held_;
     std::uint64_t        held_bytes_ = 0, used_bytes_ = 0;
-    // The last exchange's length; the rise over it; the last change in use.
-    std::uint64_t        exchange_ns_ = 0, last_use_ns_ = 0;
-    double               rise_ = 0.0;
 
     // The map. Held here alone.
     PoolMap map_;

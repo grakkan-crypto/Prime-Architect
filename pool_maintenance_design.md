@@ -25,11 +25,11 @@ Boot is not Pool Maintenance's process. Pool Maintenance has one thing to do whe
 ## The RAM exchange
 
 - Either side can ask the other for RAM, directly, in both directions.
-- **When Pool Maintenance asks:** its free space falls below the rise, meaning the net change in its use (spawned minus destroyed) over the last exchange's length of time. It asks for the rise. It checks on every spawn and grow. Pools are spawned all the time and destroyed in bulk at the end of each exchange; they are rarely grown.
-- **When the RAM Manager asks:** by the same rule on its side. Pool Maintenance chooses which bytes go: from its most recently received stretch first, cutting from the end, so the boot block is touched last. It never gives up bytes in use or its RAM part.
+- **When Pool Maintenance asks:** nothing is tracked. On a spawn or grow, if its free space cannot cover what is needed, it asks for the shortfall and the spawn or grow goes ahead. At this scale (around ten pools of about 2 MB, plus KV caches, against 79 GiB) this almost never happens.
+- **The RAM part:** if it has no room for a preserved section, Pool Maintenance asks the RAM Manager for that room and the edit goes ahead. Nothing is refused or stopped.
+- **When the RAM Manager asks:** when it cannot cover what it needs. Pool Maintenance chooses which bytes go: from its most recently received stretch first, cutting from the end, so the boot block is touched last. It never gives up bytes in use or its RAM part.
 - **Every exchange is a flag to Wellness, from both sides.** Pool Maintenance needing more than 80 GiB is a warning, and everything else outgrowing 48 GiB is a red flag. The exchange still happens.
 - Continuity is required of the boot claim only. The exchange should rarely be needed, but it must always be possible.
-- This rule is good enough for now. The system reviews and refines the balancing itself.
 
 ## The screen
 

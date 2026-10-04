@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <cstddef>    // offsetof
 #include <new>
 
@@ -28,17 +27,12 @@ void          os_chunk_return(std::uint8_t* chunk);
 // BUILD OUTLINE — TO BE REMOVED ONCE THE RAM MANAGER IS BUILT. The RAM
 // Manager hands over one continuous block of `bytes`, its first `ram_bytes`
 // designated RAM and the rest VRAM, or null when it cannot; hands over a
-// stretch of `bytes` designated VRAM, not necessarily continuous with
-// anything held, or null when it cannot, and posts the exchange to Wellness;
-// and calls give_back when its free space falls below the net rise in its
-// own use over one exchange's length of time, posting that to Wellness.
+// stretch of `bytes`, designated RAM when `ram` and VRAM otherwise, not
+// necessarily continuous with anything held, or null when it cannot, and
+// posts the exchange to Wellness; and calls give_back when it cannot cover
+// what it needs, posting that to Wellness.
 std::uint8_t* ram_manager_claim_continuous(std::uint64_t bytes, std::uint64_t ram_bytes);
-std::uint8_t* ram_manager_supply(std::uint64_t bytes);
-
-static std::uint64_t now_ns() {
-    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count());
-}
+std::uint8_t* ram_manager_supply(std::uint64_t bytes, bool ram);
 
 // ---------------------------------------------------------------------------
 // Boot
@@ -46,9 +40,7 @@ static std::uint64_t now_ns() {
 void PoolMaintenance::boot() {
     constexpr std::uint64_t kBootClaim = 80ull << 30, kRamPart = 1ull << 30;
     std::lock_guard<std::mutex> lock(mutex_);
-    const std::uint64_t t0 = now_ns();
-    std::uint8_t* const b  = ram_manager_claim_continuous(kBootClaim, kRamPart);
-    exchange_ns_ = now_ns() - t0;
+    std::uint8_t* const b = ram_manager_claim_continuous(kBootClaim, kRamPart);
     const bool wellness_check_pool_memory_claimed = b != nullptr;
     (void)wellness_check_pool_memory_claimed;
     if (b == nullptr) return;
@@ -96,15 +88,8 @@ const std::uint8_t* ScreenRead::unit(std::uint64_t i) {
 }
 
 // ---------------------------------------------------------------------------
-// RAM — the rise, asked for; handed back
+// RAM — handed back
 // ---------------------------------------------------------------------------
-void PoolMaintenance::use_locked(double delta) {
-    const std::uint64_t t = now_ns();
-    rise_ = (exchange_ns_ == 0 ? 0.0
-             : rise_ * std::exp(-static_cast<double>(t - last_use_ns_) / static_cast<double>(exchange_ns_)))
-            + delta;
-    last_use_ns_ = t;
-}
 
 std::vector<Stretch> PoolMaintenance::give_back(std::uint64_t bytes) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -167,10 +152,16 @@ bool PoolMaintenance::write_unit_locked(MapUnit& u, Pool next, bool present) {
             p = reinterpret_cast<Preserved*>(preserved_low_);
         }
     }
-    // No room in the RAM part to preserve the section: nothing is edited.
-    const bool wellness_check_pool_ram_part_full = p == nullptr;
-    (void)wellness_check_pool_ram_part_full;
-    if (p == nullptr) return false;
+    // No room in the RAM part to preserve the section: the room is asked
+    // for from the RAM Manager, and the edit goes ahead.
+    if (p == nullptr) {
+        const bool wellness_check_pool_ram_part_full = true;
+        (void)wellness_check_pool_ram_part_full;
+        p = reinterpret_cast<Preserved*>(ram_manager_supply(sizeof(Preserved), true));
+        const bool wellness_check_pool_ram_supplied = p != nullptr;
+        (void)wellness_check_pool_ram_supplied;
+        if (p == nullptr) return false;
+    }
 
     new (p) Preserved{ u.record, u.present, 0, false, nullptr };                 // preserve
     u.redirect.store(p, std::memory_order_release);                              // redirect
@@ -208,7 +199,6 @@ void PoolMaintenance::end_pool_locked(MapUnit& u) {
     for (std::uint8_t* c : chunks) os_chunk_return(c);          // OS_OWES
     const std::uint64_t freed = chunks.size() * os_chunk_size();   // OS_OWES
     used_bytes_ = used_bytes_ > freed ? used_bytes_ - freed : 0;
-    use_locked(-static_cast<double>(freed));
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +310,19 @@ bool PoolMaintenance::grow(const std::string& pool_id) {
 }
 
 bool PoolMaintenance::take_chunk_locked(Pool& p) {
+    // Free space that cannot cover the chunk: the shortfall is asked for,
+    // and the spawn or grow goes ahead.
+    const std::uint64_t cs   = os_chunk_size();   // OS_OWES
+    const std::uint64_t free = held_bytes_ > used_bytes_ ? held_bytes_ - used_bytes_ : 0;
+    if (free < cs) {
+        const bool wellness_check_pool_memory_low = true;
+        (void)wellness_check_pool_memory_low;
+        std::uint8_t* const s = ram_manager_supply(cs - free, false);
+        const bool wellness_check_pool_memory_supplied = s != nullptr;
+        (void)wellness_check_pool_memory_supplied;
+        if (s != nullptr) { held_.push_back({ s, cs - free }); held_bytes_ += cs - free; }
+    }
+
     std::uint8_t* c = os_chunk_take();   // OS_OWES
 
     // The OS had no chunk to give — the only thing that can fail this.
@@ -328,25 +331,9 @@ bool PoolMaintenance::take_chunk_locked(Pool& p) {
     (void)wellness_check_pool_out_of_memory;
 
     if (c == nullptr) return false;
-    const std::uint64_t cs = os_chunk_size();   // OS_OWES
     p.chunks.push_back(c);
     p.byte_capacity = p.chunks.size() * cs;
     used_bytes_ += cs;
-    use_locked(static_cast<double>(cs));
-
-    // Free below the rise over one exchange: the rise is asked for.
-    const std::uint64_t free = held_bytes_ > used_bytes_ ? held_bytes_ - used_bytes_ : 0;
-    if (rise_ > 0.0 && static_cast<double>(free) < rise_) {
-        const bool wellness_check_pool_memory_low = true;
-        (void)wellness_check_pool_memory_low;
-        const std::uint64_t want = static_cast<std::uint64_t>(rise_);
-        const std::uint64_t t0   = now_ns();
-        std::uint8_t* const s    = ram_manager_supply(want);
-        exchange_ns_ = now_ns() - t0;
-        const bool wellness_check_pool_memory_supplied = s != nullptr;
-        (void)wellness_check_pool_memory_supplied;
-        if (s != nullptr) { held_.push_back({ s, want }); held_bytes_ += want; }
-    }
     return true;
 }
 
