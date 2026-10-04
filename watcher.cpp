@@ -370,12 +370,11 @@ void Watcher::run() {
                 map_key_     = pool_maintenance().map_key();
                 has_map_key_ = true;
             }
-            const MapKey& k = map_key_;
-            ScreenRead    screen(live_registry().screen);
-            const std::uint64_t n = screen.unit_count();
-            map.reserve(n);
-            for (std::uint64_t i = 0; i < n; ++i) {
-                const std::uint8_t* p = screen.unit(i);
+            const MapKey& k      = map_key_;
+            const void*   screen = live_registry().screen;
+            map.reserve(k.unit_count);
+            for (std::uint64_t i = 0; i < k.unit_count; ++i) {
+                const std::uint8_t* p = map_record(k, screen, i);
                 if (p == nullptr) continue;
                 PoolRecord r;
                 r.id           = map_field<std::string>(p, k.pool_id);

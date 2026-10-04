@@ -6,8 +6,6 @@
 
 #include "live_registry.h"
 
-#include "pool_maintenance.h"
-
 #include <algorithm>
 #include <cctype>
 #include <utility>
@@ -30,12 +28,6 @@ bool is_rules_directives_name(const std::string& name) {
 }
 
 } // namespace
-
-// ---------------------------------------------------------------------------
-// Starting up — Pool Maintenance is told, and claims the screen.
-// ---------------------------------------------------------------------------
-
-LiveRegistry::LiveRegistry() { pool_maintenance().claim_screen(*this); }
 
 // ---------------------------------------------------------------------------
 // The standing declaration — data, read directly by whoever hands over.

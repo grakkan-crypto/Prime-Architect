@@ -64,10 +64,6 @@
 
 namespace prime {
 
-struct PoolMap;
-class PoolMaintenance;
-PoolMaintenance& pool_maintenance();
-
 // ===========================================================================
 // THE KEY — WHAT EVERY PERMISSION AND MASK BIT MEANS
 //
@@ -229,8 +225,7 @@ struct LiveTemperature {
 // ===========================================================================
 class LiveRegistry {
 public:
-    // Starting up: Pool Maintenance is told, and claims the screen.
-    LiveRegistry();
+    LiveRegistry() = default;
 
     LiveRegistry(const LiveRegistry&)            = delete;
     LiveRegistry& operator=(const LiveRegistry&) = delete;
@@ -289,9 +284,7 @@ public:
     void unlink_prompt(const std::string& prompt_id);
 
     // ---- the screen ---------------------------------------------------------
-    // The reflection of the pool map: names the map's real memory in Pool
-    // Maintenance. Claimed by Pool Maintenance when this registry starts up.
-    const PoolMap* screen = nullptr;
+    const void* screen = nullptr;
 
 private:
     // Pipeline-scoped — everything under this lock swaps as one.
