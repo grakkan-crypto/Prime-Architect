@@ -46,11 +46,16 @@ Boot is not Pool Maintenance's process. Pool Maintenance has one thing to do whe
 - No one sees an edit in progress. Readers never wait and edits never wait. A preserved section exists for one edit only, never as a standing second copy.
 - **No pools, no map.** With no pool standing the screen shows nothing, and that is correct, not a failure.
 
+## A pool
+
+- **A requested pool takes 1 MiB of Pool Maintenance's own VRAM part:** a freed one if there is one, else the next. With none left, the 1 MiB is asked for from the RAM Manager (Wellness told, both sides) and the spawn goes ahead. 1 MiB is around a quarter of a million tokens of text, far beyond an average exchange; growing is for the rare large case.
+- **Its stamps** are put on it.
+- **Its barrier** is put around it.
+- **Its KV sections** come out of Pool Maintenance's memory, and each one gets the pool's barrier. How many sections there are, per model or per agent, is KVBuilder's business, not Pool Maintenance's.
+
 ## The pool-level barrier
 
-Noted, not yet applied.
-
-- Pool Maintenance puts a pool-level barrier around each pool and around each KV cache representing that pool. It is a permission it never asked for, almost always granted automatically. Readers may not even know they hold it.
+- Pool Maintenance puts a pool-level barrier around each pool and around each KV section representing that pool. It is a permission it never asked for, almost always granted automatically. Readers may not even know they hold it.
 - Because every entry passes the barrier, Pool Maintenance always knows who is reading.
 - When a pool is marked for destruction, no new entry to the pool or its KV cache is allowed. When the last reader leaves, both are destroyed together.
 
