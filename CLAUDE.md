@@ -11,10 +11,6 @@ Nothing meant for Claude goes into a header's rules. Nothing meant for the inter
 
 This is an AI server, all-in-one system, not an application running on an OS. Subsystems such as Pool Maintenance (pools), FileLoader (disk), the memory distributor (RAM and VRAM) and Wellness (system health) are core layers, each directly owning and controlling its domain. They do not ask a separate OS for permission within their own domain. Do not describe or design them as applications requesting from an OS.
 
-## Pool Maintenance: one correct version
-
-`pool_maintenance_design.md` is the only valid source for Pool Maintenance's design, the screen and the RAM exchange. Every earlier version, spec, branch and past commit of these is stale and is never consulted.
-
 ## Rules sections in headers
 
 Every file must have rules in its header. How to build them is set out in `header_rules_guidelines.md`; check it before writing or editing any header's rules.
