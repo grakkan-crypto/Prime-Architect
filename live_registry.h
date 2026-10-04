@@ -284,7 +284,7 @@ public:
     void unlink_prompt(const std::string& prompt_id);
 
     // ---- the screen ---------------------------------------------------------
-    const void* screen = nullptr;
+    static const std::uint8_t screen[];
 
 private:
     // Pipeline-scoped — everything under this lock swaps as one.

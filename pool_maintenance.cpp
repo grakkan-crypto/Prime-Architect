@@ -1,7 +1,5 @@
 // pool_maintenance.cpp — the pool: minted, grown, reclassified, flagged and
-// destroyed here, nowhere else. Every edit to a section is preserved,
-// redirected, made in place and lifted. Every read of a pool's bytes is
-// granted here.
+// destroyed here, nowhere else. Every read of a pool's bytes is granted here.
 
 #include "pool_maintenance.h"
 
@@ -9,89 +7,36 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstddef>    // offsetof
+#include <cstddef>
 #include <new>
 
 namespace prime {
 
-// ---------------------------------------------------------------------------
-// OS_OWES — declared here exactly as they are called; the OS defines them.
-// ---------------------------------------------------------------------------
-
-// Chunks: one unit of pool memory, at the one uniform size. Null when there
-// is none to give.
-std::uint64_t os_chunk_size();
-std::uint8_t* os_chunk_take();
-void          os_chunk_return(std::uint8_t* chunk);
-
 // BUILD OUTLINE — TO BE REMOVED ONCE THE RAM MANAGER IS BUILT. The RAM
-// Manager hands over one continuous block of `bytes`, its first `ram_bytes`
+// Manager hands over one continuous block, writing its size into `bytes` and
+// the size of its RAM part into `ram_bytes`, its first `ram_bytes`
 // designated RAM and the rest VRAM, or null when it cannot; hands over a
 // stretch of `bytes`, designated RAM when `ram` and VRAM otherwise, not
-// necessarily continuous with anything held, or null when it cannot, and
-// and calls give_back when it cannot cover what it needs.
-std::uint8_t* ram_manager_claim_continuous(std::uint64_t bytes, std::uint64_t ram_bytes);
+// necessarily continuous with anything held, or null when it cannot; and
+// calls give_back when it cannot cover what it needs.
+std::uint8_t* ram_manager_claim_continuous(std::uint64_t& bytes, std::uint64_t& ram_bytes);
 std::uint8_t* ram_manager_supply(std::uint64_t bytes, bool ram);
 
-// One pool's own memory, from the VRAM part.
 constexpr std::uint64_t kPoolBytes = 1ull << 20;
 
-// ---------------------------------------------------------------------------
-// Boot
-// ---------------------------------------------------------------------------
 void PoolMaintenance::boot() {
-    constexpr std::uint64_t kBootClaim = 80ull << 30, kRamPart = 1ull << 30;
     std::lock_guard<std::mutex> lock(mutex_);
-    std::uint8_t* const b = ram_manager_claim_continuous(kBootClaim, kRamPart);
+    std::uint64_t bytes = 0, ram_bytes = 0;
+    std::uint8_t* const b = ram_manager_claim_continuous(bytes, ram_bytes);
     if (b == nullptr) return;
-    ram_           = b;
-    ram_bytes_     = kRamPart;
-    preserved_low_ = b + kRamPart;
-    map_.units     = reinterpret_cast<MapUnit*>(b);
-    held_.push_back({ b + kRamPart, kBootClaim - kRamPart });
-    held_bytes_    = kBootClaim - kRamPart;
-    vram_next_     = b + kRamPart;
-    vram_end_      = b + kBootClaim;
+    ram_       = b;
+    ram_bytes_ = ram_bytes;
+    map_.units = reinterpret_cast<MapUnit*>(b);
+    held_.push_back({ b + ram_bytes, bytes - ram_bytes });
+    held_bytes_ = bytes - ram_bytes;
+    vram_next_  = b + ram_bytes;
+    vram_end_   = b + bytes;
 }
-
-// ---------------------------------------------------------------------------
-// The screen — claimed when LiveRegistry starts up
-// ---------------------------------------------------------------------------
-void PoolMaintenance::claim_screen(LiveRegistry& registry) {
-    registry.screen = &map_;   // the reflection: the map's real memory, here
-}
-
-ScreenRead::ScreenRead(const PoolMap* reflection) : map_(reflection) {}
-
-ScreenRead::~ScreenRead() {
-    PoolMaintenance& pm = pool_maintenance();
-    std::lock_guard<std::mutex> lock(pm.screen_mutex_);
-    for (Preserved* p : landed_)
-        if (--p->readers == 0 && p->lifted) pm.free_preserved_locked(p);
-}
-
-std::uint64_t ScreenRead::unit_count() const {
-    return map_ == nullptr ? 0 : map_->unit_count.load(std::memory_order_acquire);
-}
-
-const std::uint8_t* ScreenRead::unit(std::uint64_t i) {
-    const MapUnit& u = map_->units[i];
-    {
-        std::lock_guard<std::mutex> lock(pool_maintenance().screen_mutex_);
-        if (Preserved* p = u.redirect.load(std::memory_order_acquire)) {
-            if (std::find(landed_.begin(), landed_.end(), p) == landed_.end()) {
-                ++p->readers;
-                landed_.push_back(p);
-            }
-            return p->present ? reinterpret_cast<const std::uint8_t*>(&p->entry) : nullptr;
-        }
-    }
-    return u.present ? reinterpret_cast<const std::uint8_t*>(&u.record) : nullptr;
-}
-
-// ---------------------------------------------------------------------------
-// RAM — handed back
-// ---------------------------------------------------------------------------
 
 std::vector<Stretch> PoolMaintenance::give_back(std::uint64_t bytes) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -109,13 +54,9 @@ std::vector<Stretch> PoolMaintenance::give_back(std::uint64_t bytes) {
     return out;
 }
 
-// ---------------------------------------------------------------------------
-// Arrive / leave — a pool's bytes
-// ---------------------------------------------------------------------------
 PoolRead PoolMaintenance::arrive(MapUnit* unit) {
     Gate& g = unit->gate;
     std::lock_guard<std::mutex> lock(g.m);
-    // A flagged or gone pool: no entry.
     if (g.closed) return {};
     g.holders.insert(0);
     return { unit, 0, true };
@@ -131,49 +72,13 @@ void PoolMaintenance::leave(const PoolRead& read, bool died) {
         last = read.unit->gate.closed && read.unit->gate.holders.empty();
     }
     if (!last) return;
-    // The last reader out of a flagged pool: it goes now.
     std::lock_guard<std::mutex> lock(mutex_);
     end_pool_locked(*read.unit);
 }
 
-// ---------------------------------------------------------------------------
-// The one edit, per section — preserved, redirected, edited in place, lifted
-// ---------------------------------------------------------------------------
-bool PoolMaintenance::write_unit_locked(MapUnit& u, Pool next, bool present) {
-    Preserved* p = nullptr;
-    {
-        std::lock_guard<std::mutex> screen(screen_mutex_);
-        if (free_preserved_ != nullptr) { p = free_preserved_; free_preserved_ = p->next_free; }
-        else if (preserved_low_ - sizeof(Preserved) >=
-                 reinterpret_cast<std::uint8_t*>(map_.units + map_.unit_count.load())) {
-            preserved_low_ -= sizeof(Preserved);
-            p = reinterpret_cast<Preserved*>(preserved_low_);
-        }
-    }
-    // No room in the RAM part to preserve the section: the room is asked
-    // for from the RAM Manager, and the edit goes ahead.
-    if (p == nullptr) {
-        p = reinterpret_cast<Preserved*>(ram_manager_supply(sizeof(Preserved), true));
-        if (p == nullptr) return false;
-    }
-
-    new (p) Preserved{ u.record, u.present, 0, false, nullptr };                 // preserve
-    u.redirect.store(p, std::memory_order_release);                              // redirect
-    u.record  = std::move(next);                                                 // edit, in place
+void PoolMaintenance::write_unit_locked(MapUnit& u, Pool next, bool present) {
+    u.record  = std::move(next);
     u.present = present;
-    std::lock_guard<std::mutex> screen(screen_mutex_);
-    u.redirect.store(nullptr, std::memory_order_release);                        // lift
-    p->lifted = true;
-    if (p->readers == 0) free_preserved_locked(p);
-    return true;
-}
-
-void PoolMaintenance::free_preserved_locked(Preserved* p) {
-    p->~Preserved();
-    p->next_free    = nullptr;
-    new (p) Preserved{};
-    p->next_free    = free_preserved_;
-    free_preserved_ = p;
 }
 
 MapUnit* PoolMaintenance::live_unit(const std::string& pool_id) {
@@ -188,16 +93,9 @@ MapUnit* PoolMaintenance::live_unit(const std::string& pool_id) {
 
 void PoolMaintenance::end_pool_locked(MapUnit& u) {
     if (!u.present || !u.record.flagged_for_destruction) return;
-    const std::vector<std::uint8_t*> chunks = u.record.chunks;
-    if (!write_unit_locked(u, Pool{}, false)) return;           // the edit: the entry gone
-    for (std::uint8_t* c : chunks) os_chunk_return(c);          // OS_OWES
-    const std::uint64_t freed = chunks.size() * os_chunk_size();   // OS_OWES
-    used_bytes_ = used_bytes_ > freed ? used_bytes_ - freed : 0;
+    write_unit_locked(u, Pool{}, false);
 }
 
-// ---------------------------------------------------------------------------
-// The map key — this file's layout, stated as positions
-// ---------------------------------------------------------------------------
 MapKey PoolMaintenance::map_key() const {
     MapKey k;
     k.pool_id                 = offsetof(Pool, pool_id);
@@ -210,25 +108,17 @@ MapKey PoolMaintenance::map_key() const {
     return k;
 }
 
-// ---------------------------------------------------------------------------
-// The class, as a number
-// ---------------------------------------------------------------------------
 std::uint64_t PoolMaintenance::resolve_class(const ClassRef& cls) {
     if (const auto* id = std::get_if<std::uint64_t>(&cls)) return *id;
-    // A name: read straight off LiveRegistry, now. Zero means the loaded
-    // pipeline declares no such pool.
     return live_registry().class_id_for(std::get<std::string>(cls));
 }
 
-// ---------------------------------------------------------------------------
-// Create — the moment of need
-// ---------------------------------------------------------------------------
 void PoolMaintenance::create(const ClassRef&    cls,
                              const std::string& turn_id,
                              const std::string& continues_from,
                              std::string*       pool_id_out) {
     const std::uint64_t class_id = resolve_class(cls);
-    if (class_id != 0) { // zero: no such class — refused, not invented
+    if (class_id != 0) {
         Pool p;
         p.pool_id      = IdGeneration::instance().mint_pool_id();
         p.class_id     = class_id;
@@ -239,9 +129,6 @@ void PoolMaintenance::create(const ClassRef&    cls,
 
         std::lock_guard<std::mutex> lock(mutex_);
 
-        // The id chain: prompt id(s) come off the one pool this continues,
-        // read off the map. A continuation naming a pool that is not there,
-        // or is flagged for destruction, is a refusal.
         bool chain_ok = true;
         if (!continues_from.empty()) {
             MapUnit* from = live_unit(continues_from);
@@ -249,22 +136,18 @@ void PoolMaintenance::create(const ClassRef&    cls,
             else p.prompt_ids = from->record.prompt_ids;
         }
 
-        // A free section: no pool on it. None: the map takes the next
-        // section of the RAM part, if the preserved sections leave room.
         MapUnit* free_unit = nullptr;
         if (chain_ok) {
             const std::uint64_t n = map_.unit_count.load();
             for (std::uint64_t i = 0; i < n && free_unit == nullptr; ++i)
                 if (!map_.units[i].present) free_unit = &map_.units[i];
-            if (free_unit == nullptr && ram_ != nullptr) {
-                std::lock_guard<std::mutex> screen(screen_mutex_);
-                if (reinterpret_cast<std::uint8_t*>(map_.units + n + 1) <= preserved_low_) {
-                    free_unit = new (map_.units + n) MapUnit();
-                    map_.unit_count.store(n + 1, std::memory_order_release);
-                }
+            if (free_unit == nullptr && ram_ != nullptr &&
+                reinterpret_cast<std::uint8_t*>(map_.units + n + 1) <= ram_ + ram_bytes_) {
+                free_unit = new (map_.units + n) MapUnit();
+                map_.unit_count.store(n + 1, std::memory_order_release);
             }
         }
-        // The pool's own 1 MiB of the VRAM part, before the edit.
+
         if (free_unit != nullptr && static_cast<std::uint64_t>(vram_end_ - vram_next_) >= kPoolBytes) {
             p.section       = vram_next_;
             p.byte_capacity = kPoolBytes;
@@ -277,46 +160,21 @@ void PoolMaintenance::create(const ClassRef&    cls,
                 std::lock_guard<std::mutex> gate(free_unit->gate.m);
                 free_unit->gate.closed = false;
             }
-            if (write_unit_locked(*free_unit, std::move(p), true) && pool_id_out != nullptr)   // the edit: the entry, whole
-                *pool_id_out = id;
+            write_unit_locked(*free_unit, std::move(p), true);
+            if (pool_id_out != nullptr) *pool_id_out = id;
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Grow
-// ---------------------------------------------------------------------------
 bool PoolMaintenance::grow(const std::string& pool_id) {
     std::lock_guard<std::mutex> lock(mutex_);
     MapUnit* u = live_unit(pool_id);
     if (u == nullptr) return false;
     Pool next = u->record;
-    if (!take_chunk_locked(next)) return false;
-    return write_unit_locked(*u, std::move(next), true);   // the edit: one chunk appended
-}
-
-bool PoolMaintenance::take_chunk_locked(Pool& p) {
-    // Free space that cannot cover the chunk: the shortfall is asked for,
-    // and the spawn or grow goes ahead.
-    const std::uint64_t cs   = os_chunk_size();   // OS_OWES
-    const std::uint64_t free = held_bytes_ > used_bytes_ ? held_bytes_ - used_bytes_ : 0;
-    if (free < cs) {
-        std::uint8_t* const s = ram_manager_supply(cs - free, false);
-        if (s != nullptr) { held_.push_back({ s, cs - free }); held_bytes_ += cs - free; }
-    }
-
-    std::uint8_t* c = os_chunk_take();   // OS_OWES
-
-    if (c == nullptr) return false;
-    p.chunks.push_back(c);
-    p.byte_capacity = p.chunks.size() * cs;
-    used_bytes_ += cs;
+    write_unit_locked(*u, std::move(next), true);
     return true;
 }
 
-// ---------------------------------------------------------------------------
-// The one matcher
-// ---------------------------------------------------------------------------
 bool PoolMaintenance::matches(const Pool& p, const PoolFilter& f) {
     if (std::find(f.exclude.begin(), f.exclude.end(), p.pool_id) != f.exclude.end())
         return false;
@@ -327,11 +185,6 @@ bool PoolMaintenance::matches(const Pool& p, const PoolFilter& f) {
     return true;
 }
 
-// ---------------------------------------------------------------------------
-// Destroy / flag / unflag
-// Destroy flags for destruction and closes the gate; the pool ends at its
-// last leave, or now if it has no reader.
-// ---------------------------------------------------------------------------
 std::uint64_t PoolMaintenance::destroy(const PoolFilter& filter, const std::string& source) {
     std::lock_guard<std::mutex> lock(mutex_);
     std::uint64_t n = 0;
@@ -346,11 +199,11 @@ std::uint64_t PoolMaintenance::destroy(const PoolFilter& filter, const std::stri
 
         Pool next = p;
         next.flagged_for_destruction = true;
-        if (!write_unit_locked(u, std::move(next), true)) continue;   // the edit: flagged
+        write_unit_locked(u, std::move(next), true);
         bool empty = false;
         {
             std::lock_guard<std::mutex> gate(u.gate.m);
-            u.gate.closed = true;                                       // no new reader
+            u.gate.closed = true;
             empty = u.gate.holders.empty();
         }
         if (empty) end_pool_locked(u);
@@ -372,7 +225,7 @@ std::uint64_t PoolMaintenance::flag(const PoolFilter& filter, const std::string&
             != u.record.immune_from.end()) continue;
         Pool next = u.record;
         next.immune_from.push_back(source);
-        write_unit_locked(u, std::move(next), true);                   // the edit
+        write_unit_locked(u, std::move(next), true);
     }
     return n;
 }
@@ -390,14 +243,11 @@ std::uint64_t PoolMaintenance::unflag(const PoolFilter& filter, const std::strin
         if (pos == u.record.immune_from.end()) continue;
         Pool next = u.record;
         next.immune_from.erase(next.immune_from.begin() + (pos - u.record.immune_from.begin()));
-        write_unit_locked(u, std::move(next), true);                   // the edit
+        write_unit_locked(u, std::move(next), true);
     }
     return n;
 }
 
-// ---------------------------------------------------------------------------
-// Reclassify — Class ID on the entry, nothing else
-// ---------------------------------------------------------------------------
 PoolMaintenance::Reclassify
 PoolMaintenance::reclassify(const std::string& pool_id, const ClassRef& cls) {
     const std::uint64_t class_id = resolve_class(cls);
@@ -408,8 +258,8 @@ PoolMaintenance::reclassify(const std::string& pool_id, const ClassRef& cls) {
     if (u == nullptr) return Reclassify::NotFound;
     Pool next = u->record;
     next.class_id = class_id;
-    return write_unit_locked(*u, std::move(next), true) ? Reclassify::Done
-                                                        : Reclassify::NotFound;
+    write_unit_locked(*u, std::move(next), true);
+    return Reclassify::Done;
 }
 
 } // namespace prime
