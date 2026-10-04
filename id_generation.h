@@ -32,14 +32,9 @@
 
 #include <atomic>
 #include <cstdint>
-#include <limits>
 #include <string>
 
 namespace prime {
-
-inline constexpr std::size_t kTurnIdBytes   = sizeof(std::uintptr_t) * 2 + 1 + std::numeric_limits<std::uint64_t>::digits10 + 1;
-inline constexpr std::size_t kPoolIdBytes   = 1 + kTurnIdBytes;
-inline constexpr std::size_t kPromptIdBytes = 6;
 
 class IdGeneration {
 public:

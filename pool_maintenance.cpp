@@ -22,22 +22,6 @@ namespace prime {
 std::uint8_t* ram_manager_claim_continuous(std::uint64_t& bytes, std::uint64_t& ram_bytes);
 std::uint8_t* ram_manager_supply(std::uint64_t bytes, bool ram);
 
-// BUILD OUTLINE — TO BE REMOVED ONCE THE OS PAGE FACILITY IS BUILT. The OS
-// gives the size of one page; sets one page of the screen to show `page`,
-// read-only, in one step, handing back the page it showed before, or null;
-// and hands back the page one page of the screen shows, or null.
-std::uint64_t os_page_bytes();
-std::uint8_t* os_screen_show(const std::uint8_t* screen_page, std::uint8_t* page);
-std::uint8_t* os_screen_shown(const std::uint8_t* screen_page);
-
-// BUILD OUTLINE — TO BE REMOVED ONCE THE HOME OF THE IMMUNITY DETAIL IS BUILT.
-// The detail holds each source a pool is immune from: adds one; removes one,
-// handing back whether any remain; and says whether a pool is immune from a
-// source.
-void immunity_add(const std::string& pool_id, const std::string& source);
-bool immunity_remove(const std::string& pool_id, const std::string& source);
-bool immunity_from(const std::string& pool_id, const std::string& source);
-
 constexpr std::uint64_t kPoolBytes = 1ull << 20;
 
 void PoolMaintenance::boot() {
@@ -55,23 +39,6 @@ void PoolMaintenance::boot() {
     vram_next_  = b + ram_bytes;
     vram_end_   = b + bytes;
 
-    std::uint8_t* const head = take_page_locked();
-    if (head == nullptr) return;
-    MapHead h;
-    h.key.unit_size       = sizeof(MapUnit);
-    h.key.units_per_page  = units_per_page_;
-    h.key.pool_id         = offsetof(MapUnit, pool_id);
-    h.key.class_id        = offsetof(MapUnit, class_id);
-    h.key.turn_id         = offsetof(MapUnit, turn_id);
-    h.key.prompt_id       = offsetof(MapUnit, prompt_id);
-    h.key.timestamp_ns    = offsetof(MapUnit, timestamp_ns);
-    h.key.byte_capacity   = offsetof(MapUnit, byte_capacity);
-    h.key.section         = offsetof(MapUnit, section);
-    h.key.flags           = offsetof(MapUnit, flags);
-    h.key.destruction_bit = kDestructionBit;
-    h.key.immunity_bit    = kImmunityBit;
-    std::memcpy(head, &h, sizeof h);
-    os_screen_show(LiveRegistry::screen, head);
 }
 
 std::vector<Stretch> PoolMaintenance::give_back(std::uint64_t bytes) {
@@ -175,7 +142,7 @@ std::uint64_t PoolMaintenance::live_unit(const std::string& pool_id) const {
     for (std::uint64_t i = 0; i < n; ++i) {
         const MapUnit* const u = unit_on_screen(i);
         if (u->flags & kDestructionBit) continue;
-        if (pool_id == std::string(u->pool_id, ::strnlen(u->pool_id, kPoolIdBytes))) return i;
+        if (pool_id == u->pool_id) return i;
     }
     return kNone;
 }
@@ -193,8 +160,8 @@ void PoolMaintenance::create(const ClassRef&    cls,
     if (class_id == 0) return;
     MapUnit c;
     const std::string id = IdGeneration::instance().mint_pool_id();
-    std::memcpy(c.pool_id, id.data(), std::min<std::size_t>(id.size(), kPoolIdBytes));
-    std::memcpy(c.turn_id, turn_id.data(), std::min<std::size_t>(turn_id.size(), kTurnIdBytes));
+    c.pool_id = id;
+    c.turn_id = turn_id;
     c.class_id     = static_cast<std::uint8_t>(class_id);
     c.timestamp_ns = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -205,7 +172,7 @@ void PoolMaintenance::create(const ClassRef&    cls,
     if (!continues_from.empty()) {
         const std::uint64_t from = live_unit(continues_from);
         if (from == kNone) return;
-        std::memcpy(c.prompt_id, unit_on_screen(from)->prompt_id, kPromptIdBytes);
+        c.prompt_id = unit_on_screen(from)->prompt_id;
     }
 
     std::uint8_t* s = nullptr;
@@ -217,11 +184,7 @@ void PoolMaintenance::create(const ClassRef&    cls,
     c.byte_capacity = kPoolBytes;
 
     const std::uint64_t n = unit_count();
-    if (!put_unit_locked(n, c)) {
-        used_bytes_ -= kPoolBytes;
-        if (s + kPoolBytes == vram_next_) vram_next_ = s;
-        return;
-    }
+    if (!put_unit_locked(n, c)) return;
     pool_gates_.emplace_back();
     __atomic_store_n(&reinterpret_cast<MapHead*>(os_screen_shown(LiveRegistry::screen))->unit_count, n + 1, __ATOMIC_RELEASE);
     if (pool_id_out != nullptr) *pool_id_out = id;
@@ -234,12 +197,12 @@ bool PoolMaintenance::grow(const std::string& pool_id) {
 
 bool PoolMaintenance::matches(std::uint64_t unit, const PoolFilter& f) const {
     const MapUnit* const u = unit_on_screen(unit);
-    const std::string id(u->pool_id, ::strnlen(u->pool_id, kPoolIdBytes));
+    const std::string& id = u->pool_id;
     if (std::find(f.exclude.begin(), f.exclude.end(), id) != f.exclude.end()) return false;
     if (f.pool_id   && *f.pool_id  != id)          return false;
     if (f.class_id  && *f.class_id != u->class_id) return false;
-    if (f.turn_id   && *f.turn_id  != std::string(u->turn_id, ::strnlen(u->turn_id, kTurnIdBytes)))       return false;
-    if (f.prompt_id && *f.prompt_id != std::string(u->prompt_id, ::strnlen(u->prompt_id, kPromptIdBytes))) return false;
+    if (f.turn_id   && *f.turn_id  != u->turn_id)       return false;
+    if (f.prompt_id && *f.prompt_id != u->prompt_id) return false;
     return true;
 }
 
@@ -250,8 +213,7 @@ std::uint64_t PoolMaintenance::destroy(const PoolFilter& filter, const std::stri
     for (std::uint64_t i = 0; i < count; ++i) {
         const MapUnit* const u = unit_on_screen(i);
         if ((u->flags & kDestructionBit) || !matches(i, filter)) continue;
-        if ((u->flags & kImmunityBit) &&
-            immunity_from(std::string(u->pool_id, ::strnlen(u->pool_id, kPoolIdBytes)), source)) continue;
+        if (u->flags & kImmunityBit) continue;
         write_field_locked(i, offsetof(MapUnit, flags), kDestructionBit, 1);
         {
             std::lock_guard<std::mutex> g(pool_gates_[i].m);
@@ -270,7 +232,6 @@ std::uint64_t PoolMaintenance::flag(const PoolFilter& filter, const std::string&
         const MapUnit* const u = unit_on_screen(i);
         if ((u->flags & kDestructionBit) || !matches(i, filter)) continue;
         ++n;
-        immunity_add(std::string(u->pool_id, ::strnlen(u->pool_id, kPoolIdBytes)), source);
         write_field_locked(i, offsetof(MapUnit, flags), kImmunityBit, 1);
     }
     return n;
@@ -284,9 +245,7 @@ std::uint64_t PoolMaintenance::unflag(const PoolFilter& filter, const std::strin
         const MapUnit* const u = unit_on_screen(i);
         if ((u->flags & kDestructionBit) || !matches(i, filter)) continue;
         ++n;
-        if (!(u->flags & kImmunityBit)) continue;
-        if (!immunity_remove(std::string(u->pool_id, ::strnlen(u->pool_id, kPoolIdBytes)), source))
-            write_field_locked(i, offsetof(MapUnit, flags), kImmunityBit, 2);
+        write_field_locked(i, offsetof(MapUnit, flags), kImmunityBit, 2);
     }
     return n;
 }

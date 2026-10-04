@@ -1,6 +1,5 @@
 #pragma once
 
-#include "id_generation.h"
 #include "live_registry.h"
 
 #include <cstdint>
@@ -28,9 +27,9 @@ struct MapUnit {
     std::uint64_t timestamp_ns  = 0;
     std::uint64_t byte_capacity = 0;
     std::uint64_t section       = 0;
-    char          pool_id  [kPoolIdBytes]   = {};
-    char          turn_id  [kTurnIdBytes]   = {};
-    char          prompt_id[kPromptIdBytes] = {};
+    std::string   pool_id;
+    std::string   turn_id;
+    std::string   prompt_id;
     std::uint8_t  class_id = 0;
     std::uint8_t  flags    = 0;
 };
